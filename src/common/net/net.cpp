@@ -25,7 +25,7 @@ std::optional<Asset> Release::GetPlatformAsset() const {
     if (platform.empty())
         return std::nullopt;
 
-    // Release files are named orchid-<tag>-<platform>.<extension>.
+    // Release files are named trudy-<tag>-<platform>.<extension>.
     const auto suffix = fmt::format("-{}", platform);
     for (const Asset& asset : assets) {
         const std::string_view name = asset.name;
@@ -139,7 +139,7 @@ std::optional<std::string> MakeRequest(const std::string& url, const std::string
 
         client->set_follow_location(true);
         client->set_default_headers({{"Accept", "application/vnd.github+json"},
-                                     {"User-Agent", "Orchid"}});
+                                     {"User-Agent", "Trudy"}});
         httplib::Result result = client->send(request);
 
         if (!result) {

@@ -200,7 +200,7 @@ int main(int argc, char* argv[]) {
 
     // Init settings params
     QCoreApplication::setOrganizationName(QStringLiteral("eden"));
-    QCoreApplication::setApplicationName(QStringLiteral("Orchid"));
+    QCoreApplication::setApplicationName(QStringLiteral("Trudy"));
 
     // Increases the maximum open file limit.
     // TODO: This should be common to all frontends.
@@ -252,7 +252,7 @@ int main(int argc, char* argv[]) {
 
     // Fix the Wayland appId. This needs to match the name of the .desktop file without the .desktop
     // suffix.
-    QGuiApplication::setDesktopFileName(QStringLiteral("dev.orchid.orchid"));
+    QGuiApplication::setDesktopFileName(QStringLiteral("dev.trudy.trudy"));
 #endif
 
     auto rounding_policy = GetHighDpiRoundingPolicy();

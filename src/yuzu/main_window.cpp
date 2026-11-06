@@ -1297,7 +1297,7 @@ void MainWindow::InitializeHotkeys() {
     hotkey_registry.LoadHotkeys();
 
     LinkActionShortcut(ui->action_Load_File, QStringLiteral("Load File"));
-    LinkActionShortcut(ui->action_Exit, QStringLiteral("Exit Orchid"));
+    LinkActionShortcut(ui->action_Exit, QStringLiteral("Exit Trudy"));
     LinkActionShortcut(ui->action_Restart, QStringLiteral("Restart Emulation"));
     LinkActionShortcut(ui->action_Pause, QStringLiteral("Continue/Pause Emulation"));
     LinkActionShortcut(ui->action_Stop, QStringLiteral("Stop Emulation"));
@@ -1937,7 +1937,7 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
     if (close_pending) {
         return;
     }
-    LOG_INFO(Frontend, "Orchid starting...");
+    LOG_INFO(Frontend, "Trudy starting...");
 
     if (params.program_id == 0 ||
         params.program_id > static_cast<u64>(Service::AM::AppletProgramId::MaxProgramId)) {
@@ -1981,7 +1981,7 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
             QMessageBox::question(
                 this, tr("Recommended %1 settings").arg(name),
                 tr("Use the recommended settings for %1?\n\n%2\n\n"
-                   "They apply to %1 until Orchid is closed. Your saved settings are not "
+                   "They apply to %1 until Trudy is closed. Your saved settings are not "
                    "changed.")
                     .arg(name, QString::fromUtf8(preset->summary)),
                 QMessageBox::Yes | QMessageBox::No, QMessageBox::No) == QMessageBox::Yes;
@@ -3362,7 +3362,7 @@ void MainWindow::OnReportCrash() {
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         QMessageBox::warning(this, tr("Report a Crash"),
                              tr("No log of a previous run was found. Start the game again until "
-                                "it crashes, then use this menu entry after restarting Orchid."));
+                                "it crashes, then use this menu entry after restarting Trudy."));
         return;
     }
     const QStringList lines = QString::fromUtf8(file.readAll()).split(QLatin1Char('\n'));
@@ -4798,7 +4798,7 @@ void MainWindow::OnCheckGraphicsBackend() {
         UISettings::values.gui_force_x11.SetValue(true);
         GraphicsBackend::SetForceX11(true);
         QMessageBox::information(this, tr("Restart Required"),
-                                 tr("Restart Orchid to apply the X11 backend."));
+                                 tr("Restart Trudy to apply the X11 backend."));
     }
 }
 #endif
@@ -4917,8 +4917,8 @@ bool MainWindow::ConfirmClose() {
         UISettings::values.confirm_before_stopping.GetValue() == ConfirmStop::Ask_Based_On_Game)
         return true;
 
-    const auto text = tr("Are you sure you want to close Orchid?");
-    return question(this, tr("Orchid"), text);
+    const auto text = tr("Are you sure you want to close Trudy?");
+    return question(this, tr("Trudy"), text);
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {
@@ -5024,7 +5024,7 @@ bool MainWindow::ConfirmChangeGame() {
 
     // Use custom question to link controller navigation
     return question(
-        this, tr("Orchid"),
+        this, tr("Trudy"),
         tr("Are you sure you want to stop the emulation? Any unsaved progress will be lost."),
         QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
 }
@@ -5033,10 +5033,10 @@ bool MainWindow::ConfirmForceLockedExit() {
     if (QtCommon::emu_thread == nullptr)
         return true;
 
-    const auto text = tr("The currently running application has requested Orchid to not exit.\n\n"
+    const auto text = tr("The currently running application has requested Trudy to not exit.\n\n"
                          "Would you like to bypass this and exit anyway?");
 
-    return question(this, tr("Orchid"), text);
+    return question(this, tr("Trudy"), text);
 }
 
 void MainWindow::RequestGameExit() {

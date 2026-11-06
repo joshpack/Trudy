@@ -240,7 +240,7 @@ add_executable(yuzu
     game/carousel.h game/carousel.cpp
 )
 
-set_target_properties(yuzu PROPERTIES OUTPUT_NAME "orchid")
+set_target_properties(yuzu PROPERTIES OUTPUT_NAME "trudy")
 
 if (NOT APPLE)
     add_custom_command(TARGET yuzu PRE_BUILD
@@ -381,7 +381,7 @@ if (APPLE)
             XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED ON)
     # Otherwise, we'll use our own.
     else()
-        set(_icons "${_dist}/orchid.icns" "${_dist}/Assets.car")
+        set(_icons "${_dist}/trudy.icns" "${_dist}/Assets.car")
     endif()
 
     set_source_files_properties(${_icons} "${_dist}/nx2_switches.txt" PROPERTIES

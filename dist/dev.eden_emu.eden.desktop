@@ -7,13 +7,13 @@
 [Desktop Entry]
 Version=1.0
 Type=Application
-Name=Orchid
+Name=Trudy
 GenericName=Switch Emulator
 Comment=Multiplatform FOSS Switch 1 emulator written in C++, derived from Yuzu and Sudachi
-Icon=dev.orchid.orchid
-TryExec=orchid
-Exec=orchid %f
+Icon=dev.trudy.trudy
+TryExec=trudy
+Exec=trudy %f
 Categories=Game;Emulator;Qt;
 MimeType=application/x-nx-nro;application/x-nx-nso;application/x-nx-nsp;application/x-nx-xci;
 Keywords=Nintendo;Switch;
-StartupWMClass=orchid
+StartupWMClass=trudy

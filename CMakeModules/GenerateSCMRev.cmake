@@ -38,9 +38,9 @@ set(GIT_DESC ${BUILD_VERSION})
 # Generate cpp with Git revision from template
 
 if (NIGHTLY_BUILD)
-    set(REPO_NAME "Orchid Nightly")
+    set(REPO_NAME "Trudy Nightly")
 else()
-    set(REPO_NAME "Orchid")
+    set(REPO_NAME "Trudy")
 endif()
 
 set(BUILD_ID ${GIT_REFSPEC})

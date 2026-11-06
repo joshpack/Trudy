@@ -311,7 +311,7 @@ void ImportReleases(const std::vector<Common::Net::Release> &releases) {
         const u64 pickup_limit = published + 600000000;
         const u32 priority = rel.prerelease ? 1500 : 2500;
 
-        std::string author = "Orchid";
+        std::string author = "Trudy";
 
         auto payload = BuildMsgpack(title, FormatBody(body, title), title, published,
                                     pickup_limit, priority, {"en"}, author, {},

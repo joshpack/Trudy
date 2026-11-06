@@ -26,6 +26,7 @@
 #include "video_core/vulkan_common/vulkan_memory_allocator.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
 #include "video_core/texture_cache/util.h"
+#include "video_core/trudy_counters.h"
 
 namespace Vulkan {
 namespace {
@@ -519,6 +520,7 @@ void BufferCacheRuntime::CopyBuffer(VkBuffer dst_buffer, VkBuffer src_buffer,
     boost::container::small_vector<VkBufferCopy, 8> vk_copies(copies.size());
     std::ranges::transform(copies, vk_copies.begin(), MakeBufferCopy);
     if (src_buffer == staging_pool.StreamBuf() && can_reorder_upload) {
+        VideoCommon::TrudyCounters::Add(VideoCommon::TrudyCounters::Event::CopyReordered);
         scheduler.RecordWithUploadBuffer([src_buffer, dst_buffer, vk_copies](
                                              vk::CommandBuffer, vk::CommandBuffer upload_cmdbuf) {
             upload_cmdbuf.CopyBuffer(src_buffer, dst_buffer, vk_copies);
@@ -526,6 +528,18 @@ void BufferCacheRuntime::CopyBuffer(VkBuffer dst_buffer, VkBuffer src_buffer,
         return;
     }
 
+    if (VideoCommon::TrudyCounters::enabled.load(std::memory_order_relaxed)) {
+        using VideoCommon::TrudyCounters::Event;
+        VideoCommon::TrudyCounters::Add(Event::CopyInOrder);
+        if (barrier && scheduler.RecordCount() == last_inorder_copy_record) {
+            VideoCommon::TrudyCounters::Add(Event::CopyInOrderAdjacent);
+        }
+        u64 bytes = 0;
+        for (const VkBufferCopy& copy : vk_copies) {
+            bytes += copy.size;
+        }
+        VideoCommon::TrudyCounters::Add(Event::CopyInOrderBytes, bytes);
+    }
     scheduler.RequestOutsideRenderPassOperationContext();
     scheduler.Record([src_buffer, dst_buffer, vk_copies, barrier](vk::CommandBuffer cmdbuf) {
         if (barrier) {
@@ -538,6 +552,7 @@ void BufferCacheRuntime::CopyBuffer(VkBuffer dst_buffer, VkBuffer src_buffer,
                                    vk::PIPELINE_STAGE_GRAPHICS_COMPUTE, 0, WRITE_BARRIER);
         }
     });
+    last_inorder_copy_record = scheduler.RecordCount();
 }
 
 void BufferCacheRuntime::PreCopyBarrier() {

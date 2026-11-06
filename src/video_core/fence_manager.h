@@ -29,6 +29,7 @@
 #include "video_core/host1x/syncpoint_manager.h"
 #include "video_core/nx2_profile.h"
 #include "video_core/rasterizer_interface.h"
+#include "video_core/trudy_counters.h"
 
 namespace VideoCommon {
 
@@ -97,6 +98,7 @@ public:
         const bool can_skip = !delay_fence || (!should_flush && NoFenceInFlight());
         if (can_skip && committed_flushes == 0 && SkipEmptyFence()) {
             Nx2Profile::Scope skipped_scope{Nx2Profile::Zone::FenceSkipped};
+            TrudyCounters::Add(TrudyCounters::Event::FenceSkipped);
             gpu.BeginAsyncGuestWrite();
             SCOPE_EXIT { gpu.EndAsyncGuestWrite(); };
             func();
@@ -104,7 +106,23 @@ public:
             return;
         }
         skipped_fences = 0;
-        should_flush |= query_cache.HasUncommittedFlushes();
+        const bool query_flush = query_cache.HasUncommittedFlushes();
+        should_flush |= query_flush;
+        if (TrudyCounters::enabled.load(std::memory_order_relaxed)) {
+            using TrudyCounters::Event;
+            if (!should_flush) {
+                TrudyCounters::Add(Event::FenceStubbed);
+            }
+            if ((committed_flushes & TextureFlushes) != 0) {
+                TrudyCounters::Add(Event::FenceTextureFlush);
+            }
+            if ((committed_flushes & BufferFlushes) != 0) {
+                TrudyCounters::Add(Event::FenceBufferFlush);
+            }
+            if (query_flush) {
+                TrudyCounters::Add(Event::FenceQueryFlush);
+            }
+        }
         query_cache.CommitAsyncFlushes();
         TFence new_fence = CreateFence(!should_flush);
         if constexpr (can_async_check) {
@@ -128,7 +146,8 @@ public:
         }
         fences.push(std::move(new_fence));
         if (should_flush) {
-            rasterizer.FlushCommands();
+            // Trudy: Vulkan batches this submission with other fences' (FlushCommandsForFence).
+            rasterizer.FlushCommandsForFence();
         }
         if constexpr (can_async_check) {
             guard.unlock();

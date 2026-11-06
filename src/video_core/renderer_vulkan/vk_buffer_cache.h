@@ -290,6 +290,9 @@ public:
     }
 
 private:
+    /// Trudy: Scheduler::RecordCount() right after the last in-order copy (TRUDY_GPU_TIMING).
+    u64 last_inorder_copy_record = ~u64{0};
+
     void BindBuffer(const Buffer& buffer, u32 offset, u32 size) {
         const VkBuffer handle = buffer.Handle();
         if (handle == VK_NULL_HANDLE) {

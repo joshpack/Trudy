@@ -56,6 +56,11 @@ public:
         return static_cast<bool>(pipeline);
     }
 
+    /// Trudy: identifies the shader in GPU timing logs (TRUDY_GPU_TIMING).
+    [[nodiscard]] u64 ShaderHash() const noexcept {
+        return shader_hash;
+    }
+
 private:
     const Device& device;
     vk::PipelineCache& pipeline_cache;

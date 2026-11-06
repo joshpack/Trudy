@@ -22,7 +22,10 @@
 #include "common/thread.h"
 #include "core/core.h"
 #include "video_core/engines/engine_interface.h"
+#include "video_core/gpu.h"
 #include "video_core/gpu_split.h"
+#include "video_core/rasterizer_interface.h"
+#include "video_core/renderer_base.h"
 #include "video_core/nx2.h"
 #include "video_core/nx2_profile.h"
 
@@ -365,6 +368,9 @@ void GpuSplit::BackLoop(std::stop_token stop_token) {
     g_back_thread_id.store(GetCurrentThreadId(), std::memory_order_relaxed);
 #endif
     u64 read_position = 0;
+    // Trudy: submissions fences deferred (Vulkan::Scheduler::RequestDeferredFlush) go out
+    // before this thread runs out of work; see the end of the loop.
+    VideoCore::RasterizerInterface* const rasterizer = system->GPU().Renderer().ReadRasterizer();
     while (!stop_token.stop_requested()) {
         Nx2Profile::Report("GPU back thread");
         u64 available = published.load(std::memory_order_acquire);
@@ -407,6 +413,13 @@ void GpuSplit::BackLoop(std::stop_token stop_token) {
                 consumed.store(read_position, std::memory_order_release);
                 last_store = read_position;
             }
+        }
+        // Trudy: out of work: submit what fences deferred now, while this thread still owns the
+        // scheduler. Once `consumed` reaches a drain's target the front may record itself (a
+        // macro's DMA read flushes a region through the rasterizer), so the back must not touch
+        // the scheduler after that. With more work published already, the next batch ends here.
+        if (rasterizer != nullptr && published.load(std::memory_order_acquire) == read_position) {
+            rasterizer->FlushDeferredCommands();
         }
         g_back_busy.store(false, std::memory_order_release);
         consumed.store(read_position, std::memory_order_release);

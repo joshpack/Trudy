@@ -107,6 +107,11 @@ void ThreadManager::StartThread(VideoCore::RendererBase& renderer, Core::Fronten
                     scheduler.ResumePending(system.GPU());
                 }
                 if (!state.queue.TryPop(next)) {
+                    // Trudy: without the split this thread records; submit what fences
+                    // deferred before waiting (Vulkan::Scheduler::RequestDeferredFlush).
+                    if (!split.Active() && rasterizer != nullptr) {
+                        rasterizer->FlushDeferredCommands();
+                    }
                     // The CPU usually releases the semaphore soon after: poll for half a
                     // millisecond before sleeping, or every wait also waits out a host sleep
                     // (title 1 waits ~25 times a second).
@@ -123,7 +128,12 @@ void ThreadManager::StartThread(VideoCore::RendererBase& renderer, Core::Fronten
                         continue;
                     }
                 }
-            } else {
+            } else if (!split.Active() && rasterizer != nullptr && !state.queue.TryPop(next)) {
+                // Trudy: out of work while this thread records: submit what fences deferred.
+                rasterizer->FlushDeferredCommands();
+                Profile::Scope scope{Profile::Zone::Idle};
+                state.queue.PopWait(next, stop_token);
+            } else if (std::holds_alternative<std::monostate>(next.data)) {
                 Profile::Scope scope{Profile::Zone::Idle};
                 state.queue.PopWait(next, stop_token);
             }

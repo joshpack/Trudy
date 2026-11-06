@@ -126,6 +126,8 @@ public:
     void FragmentBarrier() override;
     void TiledCacheBarrier() override;
     void FlushCommands() override;
+    void FlushCommandsForFence() override;
+    void FlushDeferredCommands() override;
     void TickFrame() override;
     bool AccelerateConditionalRendering() override;
     bool HasDrawTransformFeedback() override;

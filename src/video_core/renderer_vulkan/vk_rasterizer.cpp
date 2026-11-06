@@ -43,6 +43,7 @@
 #include "video_core/renderer_vulkan/maxwell_to_vk.h"
 #include "video_core/renderer_vulkan/vk_buffer_cache.h"
 #include "video_core/renderer_vulkan/vk_compute_pipeline.h"
+#include "video_core/renderer_vulkan/vk_gpu_timer.h"
 #include "video_core/renderer_vulkan/vk_descriptor_pool.h"
 #include "video_core/renderer_vulkan/vk_pipeline_cache.h"
 #include "video_core/renderer_vulkan/vk_query_cache.h"
@@ -240,11 +241,13 @@ RasterizerVulkan::RasterizerVulkan(Core::Frontend::EmuWindow& emu_window_, Tegra
       fence_manager(*this, gpu, texture_cache, buffer_cache, query_cache, device, scheduler),
       wfi_event(device.GetLogical().CreateEvent()) {
     scheduler.SetQueryCache(query_cache);
+    GpuTimer::Create(device, scheduler);
 }
 
 RasterizerVulkan::~RasterizerVulkan() {
     scheduler.WaitWorker();
     scheduler.Finish();
+    GpuTimer::Destroy();
 }
 
 
@@ -490,7 +493,16 @@ void RasterizerVulkan::PrepareDraw(bool is_indexed, Func&& draw_func) {
     query_cache.CounterEnable(VideoCommon::QueryType::ZPassPixelCount64, maxwell3d->regs.zpass_pixel_count_enable);
     {
         Profile::Scope scope{Profile::Zone::DrawRecord};
+        // Trudy: TRUDY_GPU_TIMING=1 times each pipeline's draws on the host GPU.
+        GpuTimer* const gpu_timer = GpuTimer::Get();
+        const u32 timing = gpu_timer != nullptr
+                               ? gpu_timer->Begin(GpuTimer::Kind::Draw,
+                                                  pipeline->UniqueHash(1) * 31 + pipeline->UniqueHash(5))
+                               : GpuTimer::Invalid;
         draw_func();
+        if (gpu_timer != nullptr) {
+            gpu_timer->End(timing);
+        }
     }
     submitted = true;
     static u32 native_capture_count{};
@@ -1155,6 +1167,10 @@ void RasterizerVulkan::DispatchCompute() {
         const auto [buffer, offset] =
             buffer_cache.ObtainBuffer(*indirect_address, 12, sync_info, post_op);
         scheduler.RequestOutsideRenderPassOperationContext();
+        GpuTimer* const gpu_timer = GpuTimer::Get();
+        const u32 timing = gpu_timer != nullptr
+                               ? gpu_timer->Begin(GpuTimer::Kind::Compute, pipeline->ShaderHash())
+                               : GpuTimer::Invalid;
         scheduler.Record([pipeline, indirect_buffer = buffer->Handle(),
                           indirect_offset = offset](vk::CommandBuffer cmdbuf) {
             if (!pipeline->IsBound()) {
@@ -1162,6 +1178,9 @@ void RasterizerVulkan::DispatchCompute() {
             }
             cmdbuf.DispatchIndirect(indirect_buffer, indirect_offset);
         });
+        if (gpu_timer != nullptr) {
+            gpu_timer->End(timing);
+        }
         SubmitNx2ListCopies();
         return;
     }
@@ -1179,12 +1198,20 @@ void RasterizerVulkan::DispatchCompute() {
     };
     scheduler.Record([](vk::CommandBuffer cmdbuf) { cmdbuf.PipelineBarrier(vk::PIPELINE_STAGE_GRAPHICS_COMPUTE_TRANSFER, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
                                0, READ_BARRIER); });
+    // Trudy: TRUDY_GPU_TIMING=1 times each compute shader on the host GPU.
+    GpuTimer* const gpu_timer = GpuTimer::Get();
+    const u32 timing = gpu_timer != nullptr
+                           ? gpu_timer->Begin(GpuTimer::Kind::Compute, pipeline->ShaderHash())
+                           : GpuTimer::Invalid;
     scheduler.Record([pipeline, dim](vk::CommandBuffer cmdbuf) {
         if (!pipeline->IsBound()) {
             return;
         }
         cmdbuf.Dispatch(dim[0], dim[1], dim[2]);
     });
+    if (gpu_timer != nullptr) {
+        gpu_timer->End(timing);
+    }
     SubmitNx2ListCopies();
 
     // Log compute dispatch
@@ -1549,8 +1576,23 @@ void RasterizerVulkan::FlushCommands() {
     scheduler.Flush();
 }
 
+void RasterizerVulkan::FlushCommandsForFence() {
+    // Trudy: the fence already asked for a (batched) submission in InnerFence::Queue.
+    if (Scheduler::BatchesFenceSubmits()) {
+        return;
+    }
+    FlushCommands();
+}
+
+void RasterizerVulkan::FlushDeferredCommands() {
+    scheduler.FlushDeferred();
+}
+
 void RasterizerVulkan::TickFrame() {
     draw_counter = 0;
+    if (GpuTimer* const gpu_timer = GpuTimer::Get()) {
+        gpu_timer->Collect();
+    }
     pipeline_cache.TickFrame();
     guest_descriptor_queue.TickFrame();
     compute_pass_descriptor_queue.TickFrame();

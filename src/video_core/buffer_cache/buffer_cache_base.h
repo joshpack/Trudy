@@ -725,14 +725,52 @@ private:
     /// Queues the parts of a GPU write to [addr, addr + size) that are copied back at the next
     /// fence.
     void QueueDownload(DAddr addr, u64 size) {
-        if (DownloadsAtFence(addr, size)) {
+        // Pages the guest CPU never read: their CPU-read ranges are copied back, the rest gets a
+        // read trap (a later read flushes it once and marks it Preflushable).
+        const auto unread = [this](DAddr start, u64 length) {
+            cpu_read_ranges.ForEachInRange(start, length, [this](DAddr lower, DAddr upper) {
+                uncommitted_gpu_modified_ranges.Add(lower, upper - lower);
+            });
+            ArmReadTraps(start, length);
+        };
+        if (AsyncBufferDownloads() || (!PageDownloads() && DownloadsAtFence(addr, size))) {
             uncommitted_gpu_modified_ranges.Add(addr, size);
             return;
         }
-        cpu_read_ranges.ForEachInRange(addr, size, [this](DAddr start, DAddr end) {
-            uncommitted_gpu_modified_ranges.Add(start, end - start);
+        if (!memory_tracker.IsRegionPreflushable(addr, size)) {
+            unread(addr, size);
+            return;
+        }
+        // Trudy: only the Preflushable pages are copied back at the fence, not the whole write.
+        // A compute shader's write covers its whole storage binding, and one page of it read by
+        // the guest CPU sent the full range back at every fence: Ocarina of Time copied ~8.5 GB/s
+        // (~1.8 MB per fence) over PCIe, about a third of the host GPU's time. Every page is
+        // treated as before; TRUDY_PAGE_DOWNLOADS=0 copies whole writes back again.
+        const DAddr end = addr + size;
+        DAddr cursor = addr;
+        memory_tracker.ForEachPreflushableRange(addr, size, [&](DAddr start, u64 length) {
+            const DAddr lower = (std::max)(start, addr);
+            const DAddr upper = (std::min)(start + length, end);
+            if (upper <= lower) {
+                return;
+            }
+            if (lower > cursor) {
+                unread(cursor, lower - cursor);
+            }
+            uncommitted_gpu_modified_ranges.Add(lower, upper - lower);
+            cursor = upper;
         });
-        ArmReadTraps(addr, size);
+        if (cursor < end) {
+            unread(cursor, end - cursor);
+        }
+    }
+
+    static bool PageDownloads() {
+        static const bool enabled = [] {
+            const char* value = std::getenv("TRUDY_PAGE_DOWNLOADS");
+            return value == nullptr || value[0] != '0';
+        }();
+        return enabled;
     }
 
     // Async Buffers

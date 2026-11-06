@@ -71,6 +71,7 @@
 #endif
 #include <windows.h>
 #include <shellapi.h>
+#include <dbghelp.h>
 #include "common/windows/timer_resolution.h"
 #endif
 
@@ -115,6 +116,71 @@ static LONG WINAPI WriteCrashDump(EXCEPTION_POINTERS* exception) {
     PrintCodeAddress("at", record.ExceptionAddress);
     void* frames[48];
     const USHORT count = RtlCaptureStackBackTrace(0, 48, frames, nullptr);
+    // Trudy: the same stack with function names (from the PDB when there is one) as
+    // <dir>/eden-crash-<pid>.txt: stderr goes nowhere when eden-cli runs hidden.
+    {
+        char text_path[MAX_PATH];
+        std::snprintf(text_path, sizeof(text_path), "%s\\eden-crash-%lu.txt", directory,
+                      GetCurrentProcessId());
+        if (FILE* out = std::fopen(text_path, "w")) {
+            using SymInitializeFn = BOOL(WINAPI*)(HANDLE, PCSTR, BOOL);
+            using SymSetOptionsFn = DWORD(WINAPI*)(DWORD);
+            using SymFromAddrFn = BOOL(WINAPI*)(HANDLE, DWORD64, PDWORD64, PSYMBOL_INFO);
+            const HMODULE symbols = LoadLibraryA("dbghelp.dll");
+            SymFromAddrFn from_address = nullptr;
+            if (symbols != nullptr) {
+                const auto set_options = reinterpret_cast<SymSetOptionsFn>(
+                    GetProcAddress(symbols, "SymSetOptions"));
+                const auto initialize = reinterpret_cast<SymInitializeFn>(
+                    GetProcAddress(symbols, "SymInitialize"));
+                from_address =
+                    reinterpret_cast<SymFromAddrFn>(GetProcAddress(symbols, "SymFromAddr"));
+                if (set_options != nullptr) {
+                    set_options(SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
+                }
+                if (initialize == nullptr || !initialize(GetCurrentProcess(), nullptr, TRUE)) {
+                    from_address = nullptr;
+                }
+            }
+            const auto print = [&](const char* label, const void* address) {
+                HMODULE module{};
+                char name[MAX_PATH] = "?";
+                if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                           GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                                       static_cast<LPCSTR>(address), &module)) {
+                    GetModuleFileNameA(module, name, sizeof(name));
+                }
+                const char* base_name = std::strrchr(name, '\\');
+                alignas(SYMBOL_INFO) char storage[sizeof(SYMBOL_INFO) + 512]{};
+                auto* const symbol = reinterpret_cast<SYMBOL_INFO*>(storage);
+                symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
+                symbol->MaxNameLen = 511;
+                DWORD64 displacement = 0;
+                const bool named =
+                    from_address != nullptr &&
+                    from_address(GetCurrentProcess(), reinterpret_cast<DWORD64>(address),
+                                 &displacement, symbol);
+                std::fprintf(out, "%s %s+%#llx %s+%#llx\n", label,
+                             base_name ? base_name + 1 : name,
+                             static_cast<unsigned long long>(
+                                 reinterpret_cast<uintptr_t>(address) -
+                                 reinterpret_cast<uintptr_t>(module)),
+                             named ? symbol->Name : "?",
+                             static_cast<unsigned long long>(displacement));
+            };
+            std::fprintf(out, "Unhandled exception %#lx on thread %lu, info %#llx %#llx\n",
+                         record.ExceptionCode, GetCurrentThreadId(),
+                         static_cast<unsigned long long>(
+                             record.NumberParameters > 0 ? record.ExceptionInformation[0] : 0),
+                         static_cast<unsigned long long>(
+                             record.NumberParameters > 1 ? record.ExceptionInformation[1] : 0));
+            print("at", record.ExceptionAddress);
+            for (USHORT i = 0; i < count; ++i) {
+                print("frame", frames[i]);
+            }
+            std::fclose(out);
+        }
+    }
     for (USHORT i = 0; i < count; ++i) {
         PrintCodeAddress("frame", frames[i]);
     }

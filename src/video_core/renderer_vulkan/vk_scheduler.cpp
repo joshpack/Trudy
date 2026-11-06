@@ -4,6 +4,7 @@
 // SPDX-FileCopyrightText: Copyright 2019 yuzu Emulator Project
 // SPDX-License-Identifier: GPL-2.0-or-later
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <memory>
@@ -15,11 +16,13 @@
 
 #include "video_core/renderer_vulkan/vk_query_cache.h"
 
+#include "common/scope_exit.h"
 #include "common/settings.h"
 #include "common/thread.h"
 #include "video_core/gpu_logging/gpu_logging.h"
 #include "video_core/readback_diagnostics.h"
 #include "video_core/renderer_vulkan/vk_command_pool.h"
+#include "video_core/renderer_vulkan/vk_gpu_timer.h"
 #include "video_core/renderer_vulkan/vk_graphics_pipeline.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
@@ -57,10 +60,59 @@ Scheduler::Scheduler(const Device& device_, StateTracker& state_tracker_)
 
 Scheduler::~Scheduler() = default;
 
+void Scheduler::TraceMark(const char* label) {
+    GpuTimer* const gpu_timer = GpuTimer::Get();
+    // Not after SubmitExecution's own command: it ends and submits the command buffer.
+    if (gpu_timer == nullptr || in_submit) {
+        return;
+    }
+    const u32 query = gpu_timer->AllocateMark(label, CurrentTick());
+    if (query == GpuTimer::Invalid) {
+        return;
+    }
+    // Straight into the chunk: RecordWithUploadBuffer would trace this command too.
+    auto command = [pool = gpu_timer->MarkPool(), query](vk::CommandBuffer cmdbuf,
+                                                         vk::CommandBuffer) {
+        cmdbuf.WriteTimestamp(VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, pool, query);
+    };
+    if (!chunk->Record(command)) {
+        DispatchWork();
+        (void)chunk->Record(command);
+    }
+}
+
+bool Scheduler::BatchesFenceSubmits() {
+    static const bool batches = [] {
+        const char* value = std::getenv("TRUDY_FENCE_BATCH");
+        return value != nullptr && std::strtoul(value, nullptr, 10) > 1;
+    }();
+    return batches;
+}
+
+void Scheduler::RequestDeferredFlush() {
+    static const u32 limit = [] {
+        const char* value = std::getenv("TRUDY_FENCE_BATCH");
+        const unsigned long parsed = value != nullptr ? std::strtoul(value, nullptr, 10) : 16;
+        return static_cast<u32>(std::clamp<unsigned long>(parsed, 1, 1024));
+    }();
+    recording_thread.store(std::this_thread::get_id(), std::memory_order_relaxed);
+    const auto now = std::chrono::steady_clock::now();
+    if (deferred_flushes == 0) {
+        deferred_since = now;
+    }
+    ++deferred_flushes;
+    if (deferred_flushes >= limit || now - deferred_since >= std::chrono::milliseconds{1}) {
+        Flush();
+    }
+}
+
 u64 Scheduler::Flush(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore) {
     if (VideoCommon::GpuSplit::check_owner) [[unlikely]] {
         VideoCommon::GpuSplit::CheckOwner("Scheduler::Flush");
     }
+    // Every submission carries whatever fences deferred (RequestDeferredFlush).
+    deferred_flushes = 0;
+    recording_thread.store(std::this_thread::get_id(), std::memory_order_relaxed);
     // When flushing, we only send data to the worker thread; no waiting is necessary.
     const u64 signal_value = SubmitExecution(signal_semaphore, wait_semaphore);
     AllocateNewContext();
@@ -74,6 +126,7 @@ void Scheduler::Finish(VkSemaphore signal_semaphore, VkSemaphore wait_semaphore)
         VideoCommon::GpuSplit::CheckOwner("Scheduler::Finish");
     }
     // When finishing, we need to wait for the submission to have executed on the device.
+    deferred_flushes = 0;
     const u64 presubmit_tick = CurrentTick();
     SubmitExecution(signal_semaphore, wait_semaphore);
     Wait(presubmit_tick);
@@ -149,6 +202,11 @@ void Scheduler::BeginRenderPassImpl(const Framebuffer* framebuffer, VkRenderPass
         };
         cmdbuf.BeginRenderPass(renderpass_bi, VK_SUBPASS_CONTENTS_INLINE);
     });
+    // Trudy: TRUDY_GPU_TIMING=1 times each render pass, labelled width << 32 | height.
+    if (GpuTimer* const gpu_timer = GpuTimer::Get()) {
+        renderpass_timing = gpu_timer->Begin(
+            GpuTimer::Kind::Pass, (u64{render_area.width} << 32) | u64{render_area.height});
+    }
     num_renderpass_images = framebuffer->NumImages();
     renderpass_images = framebuffer->Images();
     renderpass_image_ranges = framebuffer->ImageRanges();
@@ -391,7 +449,25 @@ u64 Scheduler::SubmitExecution(VkSemaphore signal_semaphore, VkSemaphore wait_se
     EndPendingOperations();
     InvalidateState();
 
+    // Trudy: TRUDY_GPU_TIMING=1 times whole command buffers (closed here, reopened below).
+    VideoCommon::TrudyCounters::Add(VideoCommon::TrudyCounters::Event::SubmitOther); // all submits
+    GpuTimer* const gpu_timer = GpuTimer::Get();
+    if (gpu_timer != nullptr) {
+        gpu_timer->End(submit_timing);
+        gpu_timer->End(upload_timing);
+    }
     const u64 signal_value = master_semaphore->NextTick();
+    in_submit = true;
+    SCOPE_EXIT {
+        in_submit = false;
+        if (gpu_timer != nullptr) {
+            submit_timing = gpu_timer->Begin(GpuTimer::Kind::Submit, 0);
+            upload_timing = gpu_timer->Begin(GpuTimer::Kind::Upload, 0);
+            if (trace_marks) {
+                TraceMark("(command buffer start)");
+            }
+        }
+    };
     RecordWithUploadBuffer([signal_semaphore, wait_semaphore, signal_value,
                             this](vk::CommandBuffer cmdbuf, vk::CommandBuffer upload_cmdbuf) {
         static constexpr VkMemoryBarrier WRITE_BARRIER{
@@ -467,6 +543,12 @@ void Scheduler::EndRenderPass()
 
         query_cache->CounterEnable(VideoCommon::QueryType::ZPassPixelCount64, false);
         query_cache->NotifySegment(false);
+
+        if (GpuTimer* const gpu_timer = GpuTimer::Get(); gpu_timer != nullptr &&
+                                                          renderpass_timing != GpuTimer::Invalid) {
+            gpu_timer->End(renderpass_timing);
+            renderpass_timing = GpuTimer::Invalid;
+        }
 
         Record([num_images = num_renderpass_images,
                        images = renderpass_images,

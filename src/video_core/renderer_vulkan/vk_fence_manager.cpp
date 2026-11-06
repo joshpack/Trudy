@@ -8,6 +8,7 @@
 #include "video_core/renderer_vulkan/vk_query_cache.h"
 #include "video_core/renderer_vulkan/vk_scheduler.h"
 #include "video_core/renderer_vulkan/vk_texture_cache.h"
+#include "video_core/trudy_counters.h"
 #include "video_core/vulkan_common/vulkan_device.h"
 
 namespace Vulkan {
@@ -23,8 +24,15 @@ void InnerFence::Queue(VideoCore::RasterizerInterface& rasterizer) {
     }
     // Get the current tick so we can wait for it
     wait_tick = scheduler.CurrentTick();
+    if (Scheduler::BatchesFenceSubmits()) {
+        // Trudy: the tick is submitted with the next batch (Scheduler::RequestDeferredFlush).
+        VideoCommon::TrudyCounters::Add(VideoCommon::TrudyCounters::Event::SubmitFence);
+        scheduler.RequestDeferredFlush();
+        return;
+    }
     rasterizer.FlushCommands();
     if (scheduler.CurrentTick() == wait_tick) {
+        VideoCommon::TrudyCounters::Add(VideoCommon::TrudyCounters::Event::SubmitFence);
         scheduler.Flush();
     }
 }
@@ -38,6 +46,15 @@ bool InnerFence::IsSignaled() const {
 
 void InnerFence::Wait() {
     if (is_stubbed) {
+        return;
+    }
+    // Trudy: with batched submissions the tick may not be submitted yet. Only the recording
+    // thread may submit it (Scheduler::Wait flushes); the fencing thread waits for the host GPU
+    // instead, and the recording thread submits deferred work before it goes idle.
+    if (Scheduler::BatchesFenceSubmits() && !scheduler.IsRecordingThread()) {
+        if (!scheduler.IsFree(wait_tick)) {
+            scheduler.GetMasterSemaphore().Wait(wait_tick);
+        }
         return;
     }
     scheduler.Wait(wait_tick);

@@ -177,6 +177,15 @@ public:
     /// Notify the rasterizer to send all written commands to the host GPU.
     virtual void FlushCommands() = 0;
 
+    /// Trudy: what a fence calls after it is queued; the Vulkan rasterizer leaves the submission
+    /// to its batching (Vulkan::Scheduler::RequestDeferredFlush).
+    virtual void FlushCommandsForFence() {
+        FlushCommands();
+    }
+
+    /// Trudy: the recording thread is about to wait for more work: submit what fences deferred.
+    virtual void FlushDeferredCommands() {}
+
     /// Notify rasterizer that a frame is about to finish
     virtual void TickFrame() = 0;
 

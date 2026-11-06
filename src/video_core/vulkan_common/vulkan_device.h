@@ -390,6 +390,11 @@ public:
 
     bool ShouldBoostClocks() const;
 
+    /// Trudy: nanoseconds per timestamp tick (GPU timing, vk_gpu_timer).
+    float GetTimestampPeriod() const {
+        return properties.properties.limits.timestampPeriod;
+    }
+
     /// Returns uniform buffer alignment requirement.
     VkDeviceSize GetUniformBufferAlignment() const {
         return properties.properties.limits.minUniformBufferOffsetAlignment;

@@ -6,7 +6,10 @@
 
 #pragma once
 
+#include <atomic>
+#include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <cstddef>
 #include <functional>
 #include <memory>
@@ -20,6 +23,7 @@
 #include "common/settings.h"
 #include "video_core/gpu_split.h"
 #include "video_core/renderer_vulkan/vk_master_semaphore.h"
+#include "video_core/trudy_counters.h"
 #include "video_core/vulkan_common/vulkan_wrapper.h"
 
 namespace VideoCommon {
@@ -49,6 +53,49 @@ public:
 
     /// Sends the current execution context to the GPU and waits for it to complete.
     void Finish(VkSemaphore signal_semaphore = {}, VkSemaphore wait_semaphore = {});
+
+    /// Trudy: submission batching (experimental, off by default). A fence whose work only has to
+    /// reach the host GPU soon (its buffer downloads and query results are copied back
+    /// asynchronously) asks for a deferred flush instead of submitting at once: Switch 2 titles
+    /// make thousands of such fences a second (Ocarina of Time: ~2,500, one queue submission
+    /// each). With TRUDY_FENCE_BATCH=<n> (n > 1), up to n of them or 1 ms share one submission;
+    /// the rest goes out when the recording thread runs out of work (FlushDeferred). It cut the
+    /// submissions by ~40% but not the frame time in Ocarina of Time, so it stays opt-in.
+    /// Recording thread only.
+    void RequestDeferredFlush();
+
+    /// Submits what fences deferred, if anything. Recording thread only.
+    void FlushDeferred() {
+        if (deferred_flushes != 0) {
+            Flush();
+        }
+    }
+
+    /// Whether fences defer their submissions (TRUDY_FENCE_BATCH > 1).
+    [[nodiscard]] static bool BatchesFenceSubmits();
+
+    /// Trudy: records a timestamp labelled with the command just recorded (TRUDY_GPU_TRACE).
+    void TraceMark(const char* label);
+    static inline const bool trace_marks = [] {
+        const char* value = std::getenv("TRUDY_GPU_TRACE");
+        return value != nullptr && value[0] == '1';
+    }();
+
+    /// The command type's name for TRUDY_GPU_TRACE (no RTTI: the build turns it off). MSVC
+    /// names the lambda's enclosing function, GCC and Clang its file and line.
+    template <typename T>
+    static const char* TraceLabel() noexcept {
+#ifdef _MSC_VER
+        return __FUNCSIG__;
+#else
+        return __PRETTY_FUNCTION__;
+#endif
+    }
+
+    /// Whether the calling thread records into this scheduler (only it may submit).
+    [[nodiscard]] bool IsRecordingThread() const noexcept {
+        return recording_thread.load(std::memory_order_relaxed) == std::this_thread::get_id();
+    }
 
     /// Waits for the worker thread to finish executing everything. After this function returns it's
     /// safe to touch worker resources.
@@ -104,24 +151,35 @@ public:
     template <typename T>
         requires std::is_invocable_v<T, vk::CommandBuffer, vk::CommandBuffer>
     void RecordWithUploadBuffer(T&& command) {
-        if (VideoCommon::GpuSplit::check_owner) [[unlikely]] {
-            VideoCommon::GpuSplit::CheckOwner("Scheduler::Record");
-        }
-        ++record_count;
-        if (chunk->Record(command)) {
-            return;
-        }
-        DispatchWork();
-        (void)chunk->Record(command);
+        RecordLabeled(std::forward<T>(command), TraceLabel<T>());
     }
 
     template <typename T>
         requires std::is_invocable_v<T, vk::CommandBuffer>
     void Record(T&& c) {
-        this->RecordWithUploadBuffer(
+        // The caller's own command type labels the trace, not this wrapper's.
+        this->RecordLabeled(
             [command = std::move(c)](vk::CommandBuffer cmdbuf, vk::CommandBuffer) {
                 command(cmdbuf);
-            });
+            },
+            TraceLabel<T>());
+    }
+
+    template <typename T>
+    void RecordLabeled(T&& command, [[maybe_unused]] const char* label) {
+        if (VideoCommon::GpuSplit::check_owner) [[unlikely]] {
+            VideoCommon::GpuSplit::CheckOwner("Scheduler::Record");
+        }
+        ++record_count;
+        if (!chunk->Record(command)) {
+            DispatchWork();
+            (void)chunk->Record(command);
+        }
+        // Trudy: TRUDY_GPU_TRACE=1 timestamps the host GPU after every recorded command and
+        // charges the time since the previous one to the function that recorded it.
+        if (trace_marks) [[unlikely]] {
+            TraceMark(label);
+        }
     }
 
     /// Whether the recording thread submitted `tick` within 20 ms.
@@ -159,6 +217,7 @@ public:
     void Wait(u64 tick, double target_fps = 0.0, bool may_flush = true) {
         if (tick > 0 && (may_flush || WaitForSubmission(tick))) {
             if (tick >= master_semaphore->CurrentTick()) {
+                VideoCommon::TrudyCounters::Add(VideoCommon::TrudyCounters::Event::SubmitWait);
                 Flush();
             }
             master_semaphore->Wait(tick);
@@ -342,6 +401,18 @@ private:
     State state;
 
     u32 num_renderpass_images = 0;
+    /// Trudy: GPU timing tokens (vk_gpu_timer.h) of the open render pass and of the command
+    /// buffers being recorded, ~0u when none.
+    u32 renderpass_timing = ~0u;
+    u32 submit_timing = ~0u;
+    u32 upload_timing = ~0u;
+
+    /// Trudy: fences waiting for a deferred submission (RequestDeferredFlush), and since when.
+    u32 deferred_flushes = 0;
+    std::chrono::steady_clock::time_point deferred_since{};
+    std::atomic<std::thread::id> recording_thread{};
+    /// Trudy: SubmitExecution is recording its own command (no trace mark after it).
+    bool in_submit = false;
     std::array<VkImage, 9> renderpass_images{};
     std::array<VkImageSubresourceRange, 9> renderpass_image_ranges{};
 

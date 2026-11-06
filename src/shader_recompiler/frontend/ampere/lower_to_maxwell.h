@@ -206,7 +206,8 @@ inline LoweredProgram LowerToMaxwell(std::span<const Instruction> code, bool geo
         }
         const bool uniform_predication = opcode == 0xabb || opcode == 0xab9 || opcode == 0xc82 || opcode == 0x882 ||
                                          opcode == 0x899 || opcode == 0x499 || opcode == 0x287 || opcode == 0x887 ||
-                                         opcode == 0x28c || opcode == 0x88c;
+                                         opcode == 0x28c || opcode == 0x88c ||
+                                         (opcode == 0x299 && insn.Bits(12, 4) == 0);
         const u32 native_predicate = insn.Bits(12, 4);
         const bool guarded_uniform = (uniform_predication || uniform_guard) && native_predicate != 7;
         // A uniform guard UPn lives in R239 bit 6-n and is swapped into P(6-n) for the op.
@@ -3153,8 +3154,10 @@ case 0x311: { // F2I.FTZ.U64.TRUNC, per nvdisasm: Maxwell's F2I gives 32 bits, s
             const u32 shift = uniform_register(insn.Bits(32, 8)), high = uniform_register(insn.Bits(64, 8));
             const bool right = insn.Bits(76, 1) != 0, high_result = insn.Bits(80, 1) != 0;
             if (dst == ~0U || dst == 255 || low == ~0U || shift == ~0U || high == ~0U ||
-                native_predicate != 7 || insn.Bits(73, 2) != 3 ||
-                (insn.words[2] & ~0x000118ffU) != 0x08000600U)
+                (native_predicate != 7 && native_predicate != 0) || insn.Bits(73, 2) != 3 ||
+                (insn.words[2] & ~0x000118ffU) != 0x08000600U ||
+                (native_predicate == 0 && (!right || !high_result || low != 255 || insn.Bits(75, 1) ||
+                                           (insn.words[3] & 0xc00001ffU))))
                 return fail(index, "native uniform register shift mode");
             u32 source;
             if (high_result && low == 255) source = high;        // (high:0) >> or << s, high word

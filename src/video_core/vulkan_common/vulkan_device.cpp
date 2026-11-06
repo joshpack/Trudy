@@ -622,7 +622,13 @@ Device::Device(VkInstance instance_, vk::PhysicalDevice physical_, VkSurfaceKHR 
         const auto arch = GetNvidiaArch();
         if (arch >= NvidiaArchitecture::Arch_AmpereOrNewer) {
             LOG_WARNING(Render_Vulkan, "Ampere and newer have broken float16 math");
-            features.shader_float16_int8.shaderFloat16 = false;
+            float16_math_broken = true;
+            // Trudy: on RTX 40/50 the device keeps shaderFloat16 enabled so the tensor-core
+            // (cooperative matrix) shaders can be built; ordinary shaders still get no f16
+            // math, since IsFloat16Supported() checks float16_math_broken.
+            if (arch < NvidiaArchitecture::Arch_Ada) {
+                features.shader_float16_int8.shaderFloat16 = false;
+            }
         }
 
         // Use hardware depth/stencil blits instead when available

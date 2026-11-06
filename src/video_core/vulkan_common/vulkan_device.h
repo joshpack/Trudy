@@ -481,7 +481,7 @@ FN_MAX_LIMIT_LIST
 
     /// Returns true if the device supports float16 natively.
     bool IsFloat16Supported() const {
-        return features.shader_float16_int8.shaderFloat16;
+        return features.shader_float16_int8.shaderFloat16 && !float16_math_broken;
     }
 
     /// Returns true if the device can run shaders built against the Vulkan memory model.
@@ -791,7 +791,10 @@ FN_MAX_LIMIT_LIST
     bool IsExtCooperativeMatrixSupported() const {
         return extensions.cooperative_matrix &&
                features.cooperative_matrix_features.cooperativeMatrix &&
-               IsFloat16Supported() && SupportedSpirvVersion() >= 0x00010400 &&
+               // Trudy: the device feature, not IsFloat16Supported(): NVIDIA Ampere+ keep f16
+               // out of ordinary shader math, but tensor shaders need the Float16 capability.
+               features.shader_float16_int8.shaderFloat16 &&
+               SupportedSpirvVersion() >= 0x00010400 &&
                cooperative_matrix_shape_supported &&
                extensions.subgroup_size_control &&
                features.subgroup_size_control.subgroupSizeControl &&
@@ -1348,6 +1351,8 @@ private:
     Features features{};
     Properties properties{};
     bool cooperative_matrix_shape_supported{};
+    /// Trudy: f16 shader math is avoided (NVIDIA Ampere+) while the device feature may stay on.
+    bool float16_math_broken{};
 
     VkPhysicalDeviceFeatures2 features2{};
     VkPhysicalDeviceProperties2 properties2{};

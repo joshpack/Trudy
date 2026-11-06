@@ -42,13 +42,18 @@ struct FastDomain {
 FastDomain FindFastDomain() {
     FastDomain result{};
     DWORD length = 0;
+    // The sizing call fails by design; only the length it reports matters.
     GetLogicalProcessorInformationEx(RelationCache, nullptr, &length);
-    if (GetLastError() != ERROR_INSUFFICIENT_BUFFER || length == 0) {
+    if (length == 0) {
+        LOG_WARNING(Common, "Trudy: could not size the CPU cache list ({}), threads not pinned",
+                    GetLastError());
         return result;
     }
     std::vector<u8> buffer(length);
     auto* const base = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data());
     if (!GetLogicalProcessorInformationEx(RelationCache, base, &length)) {
+        LOG_WARNING(Common, "Trudy: could not read the CPU cache list ({}), threads not pinned",
+                    GetLastError());
         return result;
     }
 
@@ -207,9 +212,17 @@ void Apply(const FastDomain& domain) {
 void PinCurrentThreadToFastCacheDomain() {
 #if defined(_WIN32) || (defined(__linux__) && !defined(__ANDROID__))
     if (AffinityDisabled()) {
+        static const bool logged = [] {
+            LOG_INFO(Common, "Trudy: TRUDY_CCD_AFFINITY=0, threads not pinned");
+            return true;
+        }();
+        (void)logged;
         return;
     }
-    static const FastDomain domain = FindFastDomain();
+    static const FastDomain domain = [] {
+        LOG_INFO(Common, "Trudy: looking for the CPUs that share the largest L3 cache");
+        return FindFastDomain();
+    }();
     Apply(domain);
 #endif
 }

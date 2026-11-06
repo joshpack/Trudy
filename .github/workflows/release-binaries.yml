@@ -149,10 +149,12 @@ jobs:
             pgo: true
             mingw: true
             preset: zen5
+            lto: true
           - platform: linux-x86_64-zen5
             runner: ubuntu-24.04
             pgo: true
             preset: zen5
+            lto: true
           - platform: linux-aarch64
             runner: ubuntu-24.04-arm
           - platform: linux-aarch64-pgo
@@ -432,6 +434,7 @@ jobs:
             -DUSE_DISCORD_PRESENCE=OFF
             -DUSE_CCACHE=ON
             "-DYUZU_BUILD_PRESET=${{ matrix.preset || 'custom' }}"
+            "-DENABLE_LTO=${{ matrix.lto && 'ON' || 'OFF' }}"
           )
           if [ '${{ matrix.pgo }}' = 'true' ]; then
             # Same flags Eden's CI passes for its clang PGO build.
@@ -523,6 +526,7 @@ jobs:
             -DUSE_DISCORD_PRESENCE=OFF \
             -DUSE_CCACHE=ON \
             "-DYUZU_BUILD_PRESET=${{ matrix.preset || 'custom' }}" \
+            "-DENABLE_LTO=${{ matrix.lto && 'ON' || 'OFF' }}" \
             -DCMAKE_C_COMPILER=clang \
             -DCMAKE_CXX_COMPILER=clang++ \
             -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld \

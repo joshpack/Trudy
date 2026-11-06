@@ -62,6 +62,7 @@ void LoadOverrides(std::uint64_t program_id, const VideoCore::RendererBase& rend
 
 /// Title defaults for settings read while the renderer is created, applied before that (no
 /// renderer to look at yet). Same rule as LoadOverrides: only where the user kept the global value.
-void LoadEarlyOverrides(std::uint64_t program_id);
+/// is_switch2: the title is a Switch 2 program (Trudy's Switch 2 defaults, see LoadOverrides).
+void LoadEarlyOverrides(std::uint64_t program_id, bool is_switch2);
 
 } // namespace Core::GameSettings

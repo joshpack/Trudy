@@ -433,7 +433,7 @@ struct System::Impl {
         kernel.SetApplicationProcess(process->GetHandle());
 
         // Title defaults the renderer reads while it is created.
-        GameSettings::LoadEarlyOverrides(params.program_id);
+        GameSettings::LoadEarlyOverrides(params.program_id, process->GetHandle()->IsSwitch2());
 
         // Set up the rest of the system.
         SystemResultStatus init_result{SetupForApplicationProcess(system, emu_window)};

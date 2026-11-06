@@ -5,7 +5,10 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
+#include <string>
 
+#include "common/game_presets.h"
 #include "common/logging.h"
 #include "common/settings.h"
 #include "video_core/renderer_base.h"
@@ -130,7 +133,57 @@ static void OverrideIfGlobal(Settings::SwitchableSetting<T, ranged>& setting, T 
     setting.SetValue(value);
 }
 
-void LoadEarlyOverrides(std::uint64_t program_id) {
+// Trudy: whether the running title is a Switch 2 program. Set at every boot by LoadEarlyOverrides;
+// LoadOverrides runs again after the configuration dialog and needs it then too.
+static bool g_switch2_title = false;
+
+// Trudy: a default only where the user changed neither the game's own value nor the global one
+// (OverrideIfGlobal keeps only the per-game choice; a global value the user picked wins here).
+template <typename T, bool ranged>
+static bool OverrideIfUntouched(Settings::SwitchableSetting<T, ranged>& setting, T value) {
+    if (!setting.UsingGlobal() || setting.GetValue(true) != setting.GetDefault() ||
+        setting.GetDefault() == value) {
+        return false;
+    }
+    setting.SetGlobal(false);
+    setting.SetValue(value);
+    return true;
+}
+
+// Trudy: the settings every one of Orchid's Switch 2 presets shares (common/game_presets.h), for
+// the Switch 2 titles that have no preset of their own. GPU accuracy Low lets the GPU thread split
+// run (NX2_NOTES row 145: 1.46x draws a second; High keeps it off), with Balanced fences, which
+// Mario Tennis Fever and Hyrule Warriors needed under Low (occlusion reports stay in the query
+// cache, or conditional rendering hides objects), and asynchronous shaders. Titles with a preset
+// keep the boot prompt's choice. TRUDY_SWITCH2_DEFAULTS=0 turns this off.
+static void ApplySwitch2Defaults(std::uint64_t program_id) {
+    if (!g_switch2_title || Settings::FindGamePreset(program_id) != nullptr) {
+        return;
+    }
+    if (const char* value = std::getenv("TRUDY_SWITCH2_DEFAULTS"); value != nullptr && value[0] == '0') {
+        return;
+    }
+    std::string applied;
+    if (OverrideIfUntouched(Settings::values.gpu_accuracy, Settings::GpuAccuracy::Low)) {
+        applied += " GPU accuracy Low,";
+        // Balanced fences only make sense with the accuracy they were chosen for.
+        if (OverrideIfUntouched(Settings::values.gpu_fence_behavior,
+                                Settings::GpuFenceBehavior::Balanced)) {
+            applied += " Balanced fences,";
+        }
+    }
+    if (OverrideIfUntouched(Settings::values.use_asynchronous_shaders, true)) {
+        applied += " asynchronous shaders,";
+    }
+    if (!applied.empty()) {
+        applied.pop_back();
+        LOG_INFO(Core, "Trudy: Switch 2 defaults for {:016X}:{} (TRUDY_SWITCH2_DEFAULTS=0 to skip)",
+                 program_id, applied);
+    }
+}
+
+void LoadEarlyOverrides(std::uint64_t program_id, bool is_switch2) {
+    g_switch2_title = is_switch2;
     switch (static_cast<TitleID>(program_id)) {
         case TitleID::MarioTennisFever:
             // Present from the present thread: otherwise the GPU thread's back half acquires the
@@ -147,6 +200,7 @@ void LoadEarlyOverrides(std::uint64_t program_id) {
 void LoadOverrides(std::uint64_t program_id, const VideoCore::RendererBase& renderer) {
     const auto env = DetectEnvironment(renderer);
     Settings::values.preemptive_cpu_reads = false;
+    ApplySwitch2Defaults(program_id);
 
     switch (static_cast<TitleID>(program_id)) {
         case TitleID::NinjaGaidenRagebound:

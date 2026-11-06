@@ -1,57 +1,27 @@
 > [!IMPORTANT]
-> ## Report crashes from inside Orchid
-> If a game crashes, start Orchid again and pick **Help > Report a Crash on GitHub**. It opens a bug report with your build, system, GPU and driver and the end of the crash log already filled in, and opens the log folder so you can attach the full log of the crashed run. Please use it for every crash: reports with a log get fixed much faster, and reports without one are closed.
+> ## Report crashes from inside Trudy
+> If a game crashes, start Trudy again and pick **Help > Report a Crash on GitHub**. It opens a bug report on the Trudy repository with your build, system, GPU and driver and the end of the crash log already filled in, and opens the log folder so you can attach the full log of the crashed run.
 
-## What's new in 0.7.5
+## Trudy 0.1
 
-0.7.5 adds shader and buffer safety corrections, more native instruction support, and AV1
-decoding to the Windows PGO package. The fixes ported from Eglantine and its forks retain their
-source credits in the commits.
+The first Trudy release: Orchid 0.7.5 (commit 52d4474) tuned for AMD Ryzen CPUs and NVIDIA RTX 40 / RTX 50 graphics cards. All of Orchid's game fixes are included.
 
-### Graphics and shader stability
+### AMD Ryzen
 
-- Shader metadata invalidated by the CPU stays alive until renderer bindings have been cleared,
-  avoiding stale ShaderInfo pointers during shader refresh.
-- Live texture descriptor reads are checked against the pool bounds before guest memory is read.
-- Native compute buffers use their mapped extent, including supported fragmented mappings,
-  rather than treating a neighbouring shader parameter as a buffer size.
-- Routed native loads, stores and atomics check the complete descriptor range before narrowing
-  their offsets to 32 bits.
-- Native 32-bit compare-and-swap atomics and additional carry, shift and reduction instruction
-  forms are supported. High data registers and uniform reduction addresses are preserved.
-- Signed-add overflow handling and AMD demote reordering around nested returns are corrected.
-- Texture uploads can be deferred when a render-target clear will overwrite them; scissor
-  checks preserve uploads needed outside the cleared area.
+- New `-zen5` downloads for Ryzen 9000 / 9000X3D (`-march=znver5`, with Orchid's PGO profile). They do not start on older CPUs; use `-pgo` there.
+- On dual-CCD Ryzen (7950X3D, 9950X3D, 9900X3D, 9950X...) the emulator's hot threads stay on one CCD, the 3D V-Cache CCD on X3D parts. Single-CCD CPUs such as the 9800X3D are unchanged. `TRUDY_CCD_AFFINITY=0` turns it off.
 
-### Windows video decoding
+### NVIDIA RTX 40 / RTX 50
 
-- The Windows PGO build now ships FFmpeg with an AV1 decoder. CI checks that the decoder opens
-  and includes its runtime DLL dependencies. This addresses the missing-decoder error reported
-  with Ocarina of Time videos in issue #28.
+- RTX 40 (Ada) and RTX 50 (Blackwell) cards are recognised.
+- On them, the games' tensor (HMMA) instructions run on the GPU's tensor cores by default instead of a software loop. `EDEN_NX2_TENSOR=soft` restores the software path if a game shows broken effects.
 
-### System and interface
+### All systems
 
-- Long event-wait deadlines saturate instead of overflowing on non-Windows hosts.
-- Stored callbacks own their callable objects, avoiding dangling references to the source.
-- The Ocarina of Time 30 FPS preset states that its built-in patch supports specific game builds.
-
-### Confirmed from 0.7.4
-
-- Arionic confirmed that the Kirby Air Riders title-screen crash is fixed in 0.7.4; issue #19 is
-  closed. Its Vulkan texture/query corrections remain included in 0.7.5.
-- The reporter of Mario Tennis Fever issue #14 confirmed that matches load without crashing
-  on 0.7.4 in both uniform-buffer-reuse test configurations; that issue is also closed.
+- GPU waits spin for 50 µs before sleeping on CPUs with 12 or more threads (`EDEN_NX2_GPU_WAIT_SPIN_US=0` turns it off).
+- New name and orchid icon; `trudy.exe`. Settings, keys, firmware and saves are shared with Orchid (`%APPDATA%\eden`).
 
 ### Known issues
 
-- **Kirby Air Riders:** characters and lighting can still render incorrectly, and some compute
-  shaders are still unsupported.
-- **DLSS ghosting:** the native buffer changes address an identified sizing problem; the reported
-  ghosting cause and a game-level fix remain unconfirmed (issue #27).
-- **Ocarina of Time video backgrounds:** the AV1 packaging correction does not establish the
-  cause of every black-background report (issue #28).
-- **Ocarina of Time:** the exposure/fog adjustment remains a visual workaround and also thins fog
-  in interiors. `EDEN_NX2_OOT_VISUAL_WORKAROUND=0` disables it.
-- See the performance and compatibility table in the README.
-
-The PGO profile is the same as in 0.6.2.
+- In-game frame rates have not been measured for Trudy yet; Orchid's compatibility list applies. Please report your FPS for Orchid and Trudy side by side.
+- Everything listed under Orchid 0.7.5's known issues still applies.

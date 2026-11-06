@@ -15,6 +15,10 @@ The first Trudy release: Orchid 0.7.5 with all of its game fixes (and Orchid's n
 - Switch 2 games without recommended settings get what all of Orchid's presets share (GPU accuracy Low, Balanced fences, asynchronous shaders, reactive flushing off), unless you chose those settings yourself. `TRUDY_SWITCH2_DEFAULTS=0` turns this off.
 - GPU waits spin for 50 µs before sleeping on CPUs with 12 or more threads.
 
+### Fixed
+
+- Ocarina of Time: the leaves in Kokiri Forest no longer flash with a large white glow. Copying back whole ranges wrote stale GPU data over memory the game had just written.
+
 ### AMD Ryzen
 
 - New `-zen5` downloads for Ryzen 9000 / 9000X3D (`-march=znver5`, with the PGO profile). They do not start on older CPUs; use `-pgo` there.

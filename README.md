@@ -49,6 +49,7 @@ Ryzen and RTX 40/50 work comes on top.
 |---|---|---|
 | GPU results copied back to the game | once the game's CPU has read **any** page of a buffer the GPU writes, the **whole** written range is copied back after every write (Ocarina of Time: **8.6 GB/s** over PCIe, a third of the 4090's time) | only the pages the game's CPU actually reads (**0.7 GB/s**); the rest is fetched on demand if it is ever read |
 | Ocarina of Time preset | reactive flushing on | reactive flushing off: the game's main core waits on GPU reads 8% of the time instead of 31% |
+| Ocarina of Time, Kokiri Forest | the leaves flash with a large white glow (the whole-range copies write stale GPU data over memory the game just wrote) | drawn correctly |
 | Switch 2 games without a preset | GPU accuracy High (the GPU thread split stays off), synchronous shaders, reactive flushing on | what all of Orchid's presets share: accuracy Low (split on, ~1.46x draws a second), Balanced fences, asynchronous shaders, reactive flushing off. Only where you have not picked these yourself |
 | Ryzen 9000 (Zen 5) | generic x86-64 + PGO builds | also **`-zen5`** builds: `-march=znver5` + the same PGO profile |
 | Dual-CCD Ryzen (7950X3D, 9950X3D, 9900X3D, 9950X...) | threads go wherever Windows puts them | hot threads kept **on one CCD**, the **3D V-Cache CCD** on X3D parts |
@@ -137,9 +138,9 @@ time is the mean of the emulator's own present statistics (600 frames per window
 
 | Build | Settings | Frame time | FPS | 4090 busy |
 |---|---|---|---|---|
-| Trudy 0.1.0 (Orchid's emulation code), `-zen5` | Orchid's Ocarina of Time preset (reactive flushing on) | 28.8 ms | 34.7 | 55% |
-| Trudy (this version), `-zen5` | the same | 22.9 ms | 43.7 | 37% |
-| **Trudy (this version), `-zen5`** | **Trudy's preset (reactive flushing off)** | **17.9 ms** | **56.0** | 38% |
+| Trudy's first build (Orchid's emulation code), `-zen5` | Orchid's Ocarina of Time preset (reactive flushing on) | 28.8 ms | 34.7 | 55% |
+| Trudy 0.1.0, `-zen5` | the same | 22.9 ms | 43.7 | 37% |
+| **Trudy 0.1.0, `-zen5`** | **Trudy's preset (reactive flushing off)** | **17.9 ms** | **56.0** | 38% |
 
 What the profiling showed, before and after (debug-symbol build, GPU timers on):
 
@@ -154,10 +155,10 @@ Measured and **not** kept: fence submission batching (−40% submissions, same f
 a cache for `MaxContinuousRange` (no measurable gain; removed), tensor cores by default (same frame
 time, one shader rejected; opt-in).
 
-Visual check: with the old whole-range copies, the leaves in Kokiri Forest flash with a large
-white glow in 4 of 6 sampled frames while Link stands still; with page copies they do not. The
-whole-range copies wrote stale GPU data over memory the game had just written, which would explain
-it. Please report if the glow is part of the game.
+Visual check: with Orchid's whole-range copies, the leaves in Kokiri Forest flash with a large
+white glow in 4 of 6 sampled frames while Link stands still; with Trudy's page copies they do not,
+which is how the game looks: the glow is a bug. The whole-range copies wrote stale GPU data over
+memory the game had just written.
 
 ### Other checks
 

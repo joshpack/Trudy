@@ -824,6 +824,9 @@ jobs:
   fork-scan:
     name: Scan other forks
     needs: release
+    # The scan compares the forks against MythosOfs/Orchid and files its issue under a label only
+    # that repository has, so it runs there only.
+    if: github.repository == 'MythosOfs/Orchid'
     runs-on: ubuntu-24.04
     permissions:
       contents: read

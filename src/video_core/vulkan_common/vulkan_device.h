@@ -231,6 +231,10 @@ enum class NvidiaArchitecture {
     Arch_Volta,
     Arch_Turing,
     Arch_AmpereOrNewer,
+    // Trudy: told apart by device name (see RefineNvidiaArchitecture), so code that only needs
+    // "Ampere or newer" keeps comparing with >= Arch_AmpereOrNewer.
+    Arch_Ada,       // RTX 40 series, RTX xxxx Ada Generation, L4/L40
+    Arch_Blackwell, // RTX 50 series, RTX PRO Blackwell
 };
 
 /// Handles data specific to a physical device.

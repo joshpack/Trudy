@@ -347,6 +347,24 @@ void OverrideBcnFormats(::Common::unordered_map<VkFormat, VkFormatProperties>& f
 }
 #endif
 
+// Trudy: Vulkan exposes no architecture id, and Ada/Blackwell expose the same extensions as
+// Ampere, so the newer generations are recognised by their marketing names.
+NvidiaArchitecture RefineNvidiaArchitecture(NvidiaArchitecture arch, std::string_view name) {
+    if (arch < NvidiaArchitecture::Arch_AmpereOrNewer) {
+        return arch;
+    }
+    const auto has = [name](std::string_view text) { return name.find(text) != name.npos; };
+    // "RTX 50x0", "RTX 5090 D", "RTX PRO 6000 Blackwell", "B200"
+    if (has("Blackwell") || has("RTX 50") || has("RTX PRO")) {
+        return NvidiaArchitecture::Arch_Blackwell;
+    }
+    // "RTX 40x0", "RTX 4090 Laptop GPU", "RTX 6000 Ada Generation", "L40S", "L4"
+    if (has("Ada Generation") || has("RTX 40") || has(" L40") || name.ends_with(" L4")) {
+        return NvidiaArchitecture::Arch_Ada;
+    }
+    return arch;
+}
+
 NvidiaArchitecture GetNvidiaArchitecture(vk::PhysicalDevice physical,
                                         const std::set<std::string, std::less<>>& exts) {
     VkPhysicalDeviceProperties2 physical_properties{};
@@ -486,7 +504,13 @@ Device::Device(VkInstance instance_, vk::PhysicalDevice physical_, VkSurfaceKHR 
         LOG_WARNING(Render_Vulkan, "Unsuitable driver - continuing anyways");
 
     if (is_nvidia) {
-        nvidia_arch = GetNvidiaArchitecture(physical, supported_extensions);
+        nvidia_arch = RefineNvidiaArchitecture(
+            GetNvidiaArchitecture(physical, supported_extensions), GetModelName());
+        if (nvidia_arch >= NvidiaArchitecture::Arch_Ada) {
+            LOG_INFO(Render_Vulkan, "Trudy: NVIDIA {} detected ({}), RTX 40/50 defaults apply",
+                     nvidia_arch == NvidiaArchitecture::Arch_Blackwell ? "Blackwell" : "Ada",
+                     GetModelName());
+        }
     }
 
     SetupFamilies(surface);

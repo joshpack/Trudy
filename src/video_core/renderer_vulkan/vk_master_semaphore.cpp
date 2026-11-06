@@ -110,7 +110,9 @@ void MasterSemaphore::Wait(u64 tick) {
     // that ends within microseconds, and a sleep in the driver wakes up late. Off by default.
     static const auto spin = std::chrono::microseconds{[] {
         const char* value = std::getenv("EDEN_NX2_GPU_WAIT_SPIN_US");
-        return value != nullptr ? std::atoi(value) : 0;
+        // Trudy: 50 us by default on CPUs with 12+ threads, which have cores to spare for it.
+        return value != nullptr ? std::atoi(value)
+                                : (std::thread::hardware_concurrency() >= 12 ? 50 : 0);
     }()};
     if (spin.count() > 0) {
         const auto end = std::chrono::steady_clock::now() + spin;

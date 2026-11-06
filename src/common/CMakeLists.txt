@@ -120,6 +120,8 @@ add_library(
     string_util.cpp
     string_util.h
     swap.h
+    cache_affinity.cpp
+    cache_affinity.h
     thread.cpp
     thread.h
     adpf.cpp

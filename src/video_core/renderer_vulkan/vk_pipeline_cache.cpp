@@ -497,6 +497,21 @@ PipelineCache::PipelineCache(Tegra::MaxwellDeviceMemoryManager& device_memory_,
                            Common::ThreadPlacement::Background),
     translation_workers(num_translation_threads, "VkPipelineTranslator", {},
                         Common::ThreadPlacement::Background) {
+    // Trudy: RTX 40/50 run the guest's HMMA (tensor) instructions on their own tensor cores
+    // through VK_KHR_cooperative_matrix by default, instead of the software loop. The shader
+    // translator reads the same variable, so it is set for the whole process before the first
+    // shader is translated. EDEN_NX2_TENSOR=soft (or any other value) keeps the software path.
+    if (std::getenv("EDEN_NX2_TENSOR") == nullptr && device.IsNvidia() &&
+        device.GetNvidiaArch() >= NvidiaArchitecture::Arch_Ada &&
+        device.IsExtCooperativeMatrixSupported()) {
+#ifdef _WIN32
+        _putenv_s("EDEN_NX2_TENSOR", "fast");
+#else
+        setenv("EDEN_NX2_TENSOR", "fast", 0);
+#endif
+        LOG_INFO(Render_Vulkan, "Trudy: tensor instructions use the GPU's tensor cores "
+                                "(EDEN_NX2_TENSOR=soft to disable)");
+    }
     const char* tensor_mode = std::getenv("EDEN_NX2_TENSOR");
     const bool tensor_enabled = tensor_mode && std::string_view{tensor_mode} == "fast" &&
                                 device.IsExtCooperativeMatrixSupported();

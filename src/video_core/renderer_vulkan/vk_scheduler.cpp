@@ -309,7 +309,9 @@ void Scheduler::WorkerThread(std::stop_token stop_token) {
     // sleeping, since waking this thread delays every submission a reader is waiting on.
     const auto spin = std::chrono::microseconds{[] {
         const char* value = std::getenv("EDEN_NX2_GPU_WAIT_SPIN_US");
-        return value != nullptr ? std::atoi(value) : 0;
+        // Trudy: 50 us by default on CPUs with 12+ threads, which have cores to spare for it.
+        return value != nullptr ? std::atoi(value)
+                                : (std::thread::hardware_concurrency() >= 12 ? 50 : 0);
     }()};
 
     while (!stop_token.stop_requested()) {

@@ -14,6 +14,7 @@
 #include "common/error.h"
 #include "common/logging.h"
 #include "common/assert.h"
+#include "common/cache_affinity.h"
 #include "common/thread.h"
 
 #ifndef _WIN32
@@ -562,6 +563,9 @@ void SetCurrentThreadToPerformanceCores() {
         return;
     }
     SetCurrentThreadCoreGroup(CoreGroup::Performance);
+#else
+    // Trudy: on desktop, keep hot threads on the CPUs sharing the fastest L3 (one CCD).
+    PinCurrentThreadToFastCacheDomain();
 #endif
 }
 

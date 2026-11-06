@@ -116,7 +116,7 @@ jobs:
     timeout-minutes: 90
     env:
       BUILD_TAG: ${{ needs.name.outputs.tag }}
-      ASSET_NAME: orchid-${{ needs.name.outputs.tag }}-${{ matrix.platform }}
+      ASSET_NAME: trudy-${{ needs.name.outputs.tag }}-${{ matrix.platform }}
       CCACHE_DIR: ${{ github.workspace }}/.ccache
       CCACHE_MAXSIZE: 3000M
       SCCACHE_DIR: ${{ github.workspace }}/.sccache
@@ -143,6 +143,16 @@ jobs:
             runner: windows-2022
             pgo: true
             mingw: true
+          # Trudy: Ryzen 9000 builds (-march=znver5), same toolchains and profile as the -pgo ones.
+          - platform: windows-x86_64-zen5
+            runner: windows-2022
+            pgo: true
+            mingw: true
+            preset: zen5
+          - platform: linux-x86_64-zen5
+            runner: ubuntu-24.04
+            pgo: true
+            preset: zen5
           - platform: linux-aarch64
             runner: ubuntu-24.04-arm
           - platform: linux-aarch64-pgo
@@ -421,6 +431,7 @@ jobs:
             "-DORCHID_BUILD_PLATFORM=${{ matrix.platform }}"
             -DUSE_DISCORD_PRESENCE=OFF
             -DUSE_CCACHE=ON
+            "-DYUZU_BUILD_PRESET=${{ matrix.preset || 'custom' }}"
           )
           if [ '${{ matrix.pgo }}' = 'true' ]; then
             # Same flags Eden's CI passes for its clang PGO build.
@@ -511,6 +522,7 @@ jobs:
             "-DORCHID_BUILD_PLATFORM=${{ matrix.platform }}" \
             -DUSE_DISCORD_PRESENCE=OFF \
             -DUSE_CCACHE=ON \
+            "-DYUZU_BUILD_PRESET=${{ matrix.preset || 'custom' }}" \
             -DCMAKE_C_COMPILER=clang \
             -DCMAKE_CXX_COMPILER=clang++ \
             -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=lld \
@@ -522,7 +534,7 @@ jobs:
         shell: msys2 {0}
         run: |
           set -euo pipefail
-          probe_dir="$(cygpath -u "$RUNNER_TEMP")/orchid-ffmpeg-probe"
+          probe_dir="$(cygpath -u "$RUNNER_TEMP")/trudy-ffmpeg-probe"
           mkdir -p "$probe_dir"
           clang tools/ci/ffmpeg_av1_probe.c -o "$probe_dir/ffmpeg-av1-probe.exe" \
             $(pkg-config --cflags --libs libavcodec libavutil)
@@ -568,10 +580,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -x build/release/bin/orchid
+          test -x build/release/bin/trudy
           test -x build/release/bin/eden-cli
-          strip build/release/bin/orchid build/release/bin/eden-cli
-          tar -czf "$ASSET_NAME.tar.gz" -C build/release/bin orchid eden-cli licenses
+          strip build/release/bin/trudy build/release/bin/eden-cli
+          tar -czf "$ASSET_NAME.tar.gz" -C build/release/bin trudy eden-cli licenses
           test -s "$ASSET_NAME.tar.gz"
 
       # A self-contained AppImage: linuxdeploy bundles every library the two programs need except
@@ -582,7 +594,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -x build/release/bin/orchid
+          test -x build/release/bin/trudy
           test -x build/release/bin/eden-cli
           tools="$RUNNER_TEMP/linuxdeploy"
           mkdir -p "$tools"
@@ -592,18 +604,18 @@ jobs:
           curl -fsSL -o "$tools/linuxdeploy-plugin-qt-$arch.AppImage" \
             "https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-$arch.AppImage"
           chmod +x "$tools"/*.AppImage
-          # The desktop file names its icon dev.orchid.orchid.
-          icon="$RUNNER_TEMP/dev.orchid.orchid.png"
-          cp dist/Orchid.png "$icon"
+          # The desktop file names its icon dev.trudy.trudy.
+          icon="$RUNNER_TEMP/dev.trudy.trudy.png"
+          cp dist/Trudy.png "$icon"
           export APPIMAGE_EXTRACT_AND_RUN=1
           export QMAKE="$QT_ROOT_DIR/bin/qmake"
           export LDAI_OUTPUT="$ASSET_NAME.AppImage"
           export OUTPUT="$LDAI_OUTPUT"
           export ARCH="$arch"
-          mkdir -p AppDir/usr/share/licenses/orchid
-          cp -R dist/licenses/. AppDir/usr/share/licenses/orchid/
+          mkdir -p AppDir/usr/share/licenses/trudy
+          cp -R dist/licenses/. AppDir/usr/share/licenses/trudy/
           "$tools/linuxdeploy-$arch.AppImage" --appdir AppDir \
-            --executable build/release/bin/orchid \
+            --executable build/release/bin/trudy \
             --executable build/release/bin/eden-cli \
             --desktop-file dist/dev.eden_emu.eden.desktop \
             --icon-file "$icon" \
@@ -616,12 +628,12 @@ jobs:
         if: matrix.platform == 'windows-x86_64'
         shell: pwsh
         run: |
-          foreach ($exe in 'orchid.exe', 'eden-cli.exe') {
+          foreach ($exe in 'trudy.exe', 'eden-cli.exe') {
             if (-not (Test-Path "build/release/bin/$exe")) {
               throw "build/release/bin/$exe was not produced"
             }
           }
-          windeployqt --release --no-translations build/release/bin/orchid.exe
+          windeployqt --release --no-translations build/release/bin/trudy.exe
 
       # A dynamic MinGW build is not portable on its own: windeployqt6 brings the Qt libraries and
       # plugins, then every non-system DLL the binaries and those plugins pull in gets copied next to
@@ -633,10 +645,10 @@ jobs:
           set -euo pipefail
           export PATH="/ucrt64/bin:$PATH"
           cd build/release/bin
-          test -f orchid.exe
+          test -f trudy.exe
           test -f eden-cli.exe
           windeployqt6 --no-translations --no-compiler-runtime --no-opengl-sw \
-            --no-system-dxc-compiler --no-system-d3d-compiler orchid.exe
+            --no-system-dxc-compiler --no-system-d3d-compiler trudy.exe
           deps() {
             objdump -p "$1" | awk '/DLL Name:/ {print $3}' | while read -r dll; do
               [ -z "$dll" ] && continue
@@ -652,7 +664,7 @@ jobs:
               fi
             done
           }
-          for exe in orchid.exe eden-cli.exe; do
+          for exe in trudy.exe eden-cli.exe; do
             deps "$exe"
           done
           find . -name '*.dll' | while read -r dll; do
@@ -732,7 +744,7 @@ jobs:
       - name: Download binaries
         uses: actions/download-artifact@v7
         with:
-          pattern: orchid-${{ needs.name.outputs.tag }}-*
+          pattern: trudy-${{ needs.name.outputs.tag }}-*
           path: artifacts
 
       - name: Package release files
@@ -788,13 +800,13 @@ jobs:
             cat <<'EOF'
           ## Install
 
-          Windows: extract the zip and run orchid.exe, or eden-cli.exe from a terminal.
+          Windows: extract the zip and run trudy.exe, or eden-cli.exe from a terminal.
           Linux (AppImage): make it executable (chmod +x) and run it; it bundles its libraries and needs glibc 2.39 or newer (Ubuntu 24.04, Fedora 40, Debian 13, Arch).
-          Linux (tar.gz): extract it and run ./orchid or ./eden-cli; it uses your system libraries, so Qt 6 and the usual libraries must be installed.
-          macOS: Apple Silicon and macOS 15 or newer. Extract the zip and move orchid.app to Applications. The CLI is inside orchid.app/Contents/MacOS/eden-cli. The app bundles Qt and MoltenVK and is ad-hoc signed, not notarized; macOS may require approval in Privacy & Security. macOS support remains experimental and uses the JIT, not NCE.
+          Linux (tar.gz): extract it and run ./trudy or ./eden-cli; it uses your system libraries, so Qt 6 and the usual libraries must be installed.
+          macOS: Apple Silicon and macOS 15 or newer. Extract the zip and move trudy.app to Applications. The CLI is inside trudy.app/Contents/MacOS/eden-cli. The app bundles Qt and MoltenVK and is ad-hoc signed, not notarized; macOS may require approval in Privacy & Security. macOS support remains experimental and uses the JIT, not NCE.
           The -pgo builds are the same programs compiled with profile-guided optimization (clang plus the repo's orchid.profdata) and run on the same CPUs; if one is slower than the normal build for you, please report it. The Windows PGO build is a MinGW build, so it carries its own DLLs and needs no Visual C++ redistributable.
 
-          Orchid looks for newer builds of its channel at startup and from Help > Check for Updates.
+          Trudy looks for newer builds of its channel at startup and from Help > Check for Updates.
           EOF
           } > notes.md
           gh release create "$BUILD_TAG" dist/* \

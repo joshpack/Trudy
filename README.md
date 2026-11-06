@@ -108,7 +108,7 @@ Vulkan 1.4.357), Windows 11.
 | `TRUDY_CCD_AFFINITY=0` | ✅ skips the detection |
 | CI builds ([run 42142396276](https://github.com/joshpack/Trudy/actions/runs/42142396276)) | ✅ all 9 pass: Windows MSVC, Windows `-pgo`, **Windows `-zen5`**, Linux x86-64, `-pgo`, **`-zen5`**, Linux ARM64 and `-pgo`, macOS ARM |
 | Unit tests, Windows MSVC ([run 42142072841](https://github.com/joshpack/Trudy/actions/runs/42142072841)) | ⚠️ 521 of 523 pass. The 2 failures (`ampere_kirby.cpp:163`, `ampere_f2i.cpp:821`) are in Orchid's shader-lowering tests; Trudy changes no shader or test code, so they come from Orchid `52d4474` |
-| Windows `-zen5` build started on the 9800X3D + RTX 4090 | ✅ opens; window title `Trudy | v0.1.0 | Clang 23.1.5` |
+| Windows `-zen5` build started on the 9800X3D + RTX 4090 | ✅ opens; window title shows Trudy v0.1.0, built with Clang 23.1.5 |
 
 **Not tested yet**
 

@@ -154,8 +154,10 @@ static bool OverrideIfUntouched(Settings::SwitchableSetting<T, ranged>& setting,
 // the Switch 2 titles that have no preset of their own. GPU accuracy Low lets the GPU thread split
 // run (NX2_NOTES row 145: 1.46x draws a second; High keeps it off), with Balanced fences, which
 // Mario Tennis Fever and Hyrule Warriors needed under Low (occlusion reports stay in the query
-// cache, or conditional rendering hides objects), and asynchronous shaders. Titles with a preset
-// keep the boot prompt's choice. TRUDY_SWITCH2_DEFAULTS=0 turns this off.
+// cache, or conditional rendering hides objects), asynchronous shaders, and reactive flushing off
+// (Switch 2 titles have read traps instead, which protect only the pages the GPU wrote; with
+// reactive flushing on, every guest read of a GPU-cached page took the slow path). Titles with a
+// preset keep the boot prompt's choice. TRUDY_SWITCH2_DEFAULTS=0 turns this off.
 static void ApplySwitch2Defaults(std::uint64_t program_id) {
     if (!g_switch2_title || Settings::FindGamePreset(program_id) != nullptr) {
         return;
@@ -174,6 +176,9 @@ static void ApplySwitch2Defaults(std::uint64_t program_id) {
     }
     if (OverrideIfUntouched(Settings::values.use_asynchronous_shaders, true)) {
         applied += " asynchronous shaders,";
+    }
+    if (OverrideIfUntouched(Settings::values.use_reactive_flushing, false)) {
+        applied += " reactive flushing off,";
     }
     if (!applied.empty()) {
         applied.pop_back();

@@ -15,9 +15,10 @@
   <br>
 </h1>
 
-<h4 align="center">An experimental Switch 2 emulator tuned for AMD Ryzen CPUs and NVIDIA RTX 40 / RTX 50
+<h4 align="center">An experimental Switch 2 emulator tuned for speed, AMD Ryzen CPUs and NVIDIA RTX 40 / RTX 50
 graphics cards. Trudy is a fork of <a href="https://github.com/MythosOfs/Orchid">Orchid</a> and keeps
-all of Orchid's game fixes; it adds hardware-specific defaults and builds on top.</h4>
+all of Orchid's game fixes; it removes what was found slowing Switch 2 games down, and adds
+hardware-specific builds and defaults on top.</h4>
 
 > [!NOTE]
 > Trudy is an independent fork. Please report problems with Trudy builds here, not to the Orchid,
@@ -35,92 +36,145 @@ all of Orchid's game fixes; it adds hardware-specific defaults and builds on top
 
 ## Why Trudy instead of Orchid
 
-Orchid's own profiling shows that Switch 2 emulation is limited by **one host CPU thread**, the one
-that turns the game's GPU commands into Vulkan work. In Mario Kart World that thread runs at
-~100% while the host GPU sits at 20-40%. So the CPU, its caches and how the hot threads are placed
-matter most. Trudy works on those, and makes better use of what RTX 40/50 cards offer:
+> **Ocarina of Time on a Ryzen 7 9800X3D + RTX 4090: 56 FPS in Trudy where Orchid's code runs the
+> same scene at 35 FPS (+61%), with the graphics card 38% busy instead of 55%.**
+> Measured with release builds, same game, save and settings (see [Test results](#test-results)).
+
+Trudy started by profiling a real game instead of guessing. The biggest costs turned out not to be
+the CPU instruction set or thread placement, but data moving back and forth between the graphics
+card and the emulated console's memory. Fixing that helps every Switch 2 game, on any PC; the
+Ryzen and RTX 40/50 work comes on top.
 
 | | Orchid | Trudy |
 |---|---|---|
-| Builds for Ryzen 9000 (Zen 5) | generic x86-64 + PGO | also a **`-zen5`** build: `-march=znver5` + the same PGO profile |
-| Dual-CCD Ryzen (7950X3D, 9950X3D, 9900X3D, 9950X...) | threads go wherever Windows puts them | hot threads kept **on one CCD**, the **3D V-Cache CCD** on X3D parts; no Game Bar or Process Lasso needed |
-| RTX 40 / RTX 50 tensor instructions (HMMA) | software loop unless you set `EDEN_NX2_TENSOR=fast` | **tensor cores on by default** through `VK_KHR_cooperative_matrix` |
-| GPU wait latency | driver sleep, wakes late | **50 µs spin** before sleeping on 12+ thread CPUs (Orchid's own option, now on by default there) |
-| RTX 40 / 50 detection | Ampere and newer are one group | **Ada and Blackwell recognised** and logged, so later tuning can target them |
-| MSVC builds with a preset | presets ignored | `zen4`/`zen5` → `/arch:AVX512`, `v3`/`zen2` → `/arch:AVX2` |
-| Game compatibility | | same as the Orchid commit Trudy is based on (all of Orchid's fixes are kept) |
+| GPU results copied back to the game | once the game's CPU has read **any** page of a buffer the GPU writes, the **whole** written range is copied back after every write (Ocarina of Time: **8.6 GB/s** over PCIe, a third of the 4090's time) | only the pages the game's CPU actually reads (**0.7 GB/s**); the rest is fetched on demand if it is ever read |
+| Ocarina of Time preset | reactive flushing on | reactive flushing off: the game's main core waits on GPU reads 8% of the time instead of 31% |
+| Switch 2 games without a preset | GPU accuracy High (the GPU thread split stays off), synchronous shaders, reactive flushing on | what all of Orchid's presets share: accuracy Low (split on, ~1.46x draws a second), Balanced fences, asynchronous shaders, reactive flushing off. Only where you have not picked these yourself |
+| Ryzen 9000 (Zen 5) | generic x86-64 + PGO builds | also **`-zen5`** builds: `-march=znver5` + the same PGO profile |
+| Dual-CCD Ryzen (7950X3D, 9950X3D, 9900X3D, 9950X...) | threads go wherever Windows puts them | hot threads kept **on one CCD**, the **3D V-Cache CCD** on X3D parts |
+| RTX 40 / RTX 50 | treated as Ampere; the tensor-core path could never switch on (a float16 workaround disabled what it needs) | Ada and Blackwell recognised; the tensor-core path works when asked for (`EDEN_NX2_TENSOR=fast`) |
+| GPU waits | driver sleep, wakes late | 50 µs spin before sleeping on 12+ thread CPUs |
+| Profiling tools | GPU-thread CPU zones, sampling profiler | also host GPU time per shader, pipeline, render pass and command buffer (`TRUDY_GPU_TIMING=1`), a per-command GPU trace (`TRUDY_GPU_TRACE=1`) and fence/copy counters |
+| Game compatibility | | the same, with Orchid's newest fixes merged |
 | Settings, keys, firmware, saves | `%APPDATA%\eden` | the same folder, so Trudy uses what Orchid already has set up |
-
-If you are not on a Ryzen CPU or an RTX 40/50 card, Trudy behaves the same as Orchid: every
-change detects the hardware and does nothing elsewhere.
 
 ## What Trudy changes
 
-All changes against Orchid `52d4474` are in two commits; `git diff upstream/main` shows them.
+`git diff upstream/main` shows every change against Orchid.
+
+**Switch 2 performance (all PCs)**
+
+- `buffer_cache_base.h`, `memory_tracker_base.h`: buffer downloads at fences copy back only the
+  "Preflushable" pages (pages the guest CPU has read after a GPU write) instead of the whole
+  written range. A compute shader's write covers its whole storage binding (up to an 8 MiB
+  window), so one page read by the game sent megabytes back at every fence: in Ocarina of Time
+  ~4,800 copies of ~1.8 MB a second. Pages that were never read get a read trap, exactly as
+  unread ranges already did. As a side effect the full-range copies no longer overwrite data the
+  game's CPU wrote in the rest of the window. `TRUDY_PAGE_DOWNLOADS=0` restores the old behaviour.
+- `game_presets.h`: the Ocarina of Time preset now turns reactive flushing **off**, like every
+  other Switch 2 preset. Orchid's playtest found it faster on, but that was with the whole-range
+  copies; with page copies, off is faster (17.9 ms against 22.9 ms a frame).
+- `game_settings.cpp`: Switch 2 titles without a preset get the settings all of Orchid's presets
+  share (GPU accuracy Low, Balanced fences, asynchronous shaders, reactive flushing off), only
+  where neither the game's own setting nor your global one was changed.
+  `TRUDY_SWITCH2_DEFAULTS=0` turns this off.
+- Experimental, off by default: `TRUDY_FENCE_BATCH=<n>` lets up to n fences share one GPU
+  submission. It cut submissions by ~40% but did not change the frame time.
+
+**Measuring tools**
+
+- `vk_gpu_timer.cpp` (new): `TRUDY_GPU_TIMING=1` logs, every 10 s, the host GPU time of each
+  compute shader, graphics pipeline, render pass and whole command buffer (Vulkan timestamps),
+  plus counters for fences, submissions and buffer copies. `TRUDY_GPU_TRACE=1` adds a timestamp
+  after every recorded command and charges the GPU time to the function that recorded it; that is
+  how the copy-back cost above was found.
+- `eden-cli` with `EDEN_NX2_CRASH_DUMP=<dir>` also writes the crash stack with function names to
+  `eden-crash-<pid>.txt` (stderr is lost when it runs hidden).
 
 **AMD Ryzen**
 
 - `src/common/cache_affinity.cpp` (new): finds the CPUs that share each L3 cache (Windows:
   `GetLogicalProcessorInformationEx`; Linux: `/sys/devices/system/cpu/*/cache/index3`). With more
   than one L3 domain it keeps the hot threads on the largest one: guest CPU cores, core timing,
-  GPU front and back threads, GPU fencing, the Vulkan worker and presentation. That avoids
-  ~70-80 ns cross-CCD hops between threads that hand work to each other thousands of times a frame,
-  and on X3D parts it keeps the macro memo and cache lookups inside the 96 MB V-Cache. With a
-  single L3 (9800X3D, 7800X3D, 8-core parts, most Intel CPUs) nothing changes.
-  `TRUDY_CCD_AFFINITY=0` turns it off.
+  GPU front and back threads, GPU fencing, the Vulkan worker and presentation. With a single L3
+  (9800X3D, 7800X3D, 8-core parts, most Intel CPUs) nothing changes. `TRUDY_CCD_AFFINITY=0` turns
+  it off.
 - `CMakeLists.txt`: a `zen5` build preset (`-march=znver5 -mtune=znver5`, clang 19+ / GCC 14+);
-  MSVC presets mapped to `/arch:AVX512` and `/arch:AVX2`.
-- CI: `windows-x86_64-zen5` and `linux-x86_64-zen5` release files, built like the `-pgo` ones.
-- The dynarmic JIT already emits AVX-512 code when the CPU has it. Zen 5 runs AVX-512 at full
-  width, so Trudy keeps that on; `EDEN_NX2_AVX512=0` still turns it off if a game misbehaves.
+  MSVC presets mapped to `/arch:AVX512` and `/arch:AVX2`. CI builds `windows-x86_64-zen5` and
+  `linux-x86_64-zen5`.
+- The dynarmic JIT already emits AVX-512 code when the CPU has it, which Zen 5 runs at full width;
+  `EDEN_NX2_AVX512=0` turns it off if a game misbehaves.
 
 **NVIDIA RTX 40 / RTX 50**
 
-- `vulkan_device.cpp/.h`: `Arch_Ada` and `Arch_Blackwell`. Vulkan has no architecture id and
-  Ada/Blackwell expose the same extensions as Ampere, so they are recognised by name (RTX 40xx,
-  RTX xxxx Ada Generation, L4/L40 → Ada; RTX 50xx, RTX PRO, Blackwell → Blackwell). Turing and
-  Ampere cards are never upgraded by mistake.
-- `vk_pipeline_cache.cpp`: on Ada/Blackwell with `VK_KHR_cooperative_matrix`, the guest's HMMA
-  matrix instructions run on the tensor cores (Orchid's experimental `fast` path) instead of a
-  software loop of hundreds of instructions. `EDEN_NX2_TENSOR=soft` keeps the software path.
-- `vk_master_semaphore.cpp`, `vk_scheduler.cpp`: `EDEN_NX2_GPU_WAIT_SPIN_US` defaults to 50 on
-  CPUs with 12 or more threads; the waits are often for work that ends within microseconds.
+- `vulkan_device.cpp/.h`: `Arch_Ada` and `Arch_Blackwell`, recognised by name (Vulkan has no
+  architecture id and they expose the same extensions as Ampere). Turing and Ampere cards are
+  never upgraded by mistake.
+- Eden turns the float16 shader feature off on every NVIDIA Ampere+ card because float16 math is
+  broken there, and the tensor-core (cooperative matrix) path needs that feature, so it could
+  never switch on. Trudy keeps the device feature on for RTX 40/50 while ordinary shaders still
+  avoid float16 math, so `EDEN_NX2_TENSOR=fast` now works. It is not the default: in Ocarina of
+  Time it rejected one of the game's compute shaders and the frame time was the same.
+- `EDEN_NX2_GPU_WAIT_SPIN_US` defaults to 50 on CPUs with 12 or more threads.
 
 **Name and icon**
 
-- New orchid icon (`dist/trudy.svg`): white-and-pink orchids on deep teal, so it is easy to tell
-  apart from Orchid's magenta-on-purple one. Rendered to the Windows `.ico`, the in-app icon, the
-  SDL `.bmp`, the macOS `.icns` and the Linux `.svg`.
-- `trudy.exe`, window titles, dialogs, translations, release files `trudy-*`, desktop id
-  `dev.trudy.trudy`. The about box credits Orchid and Eden.
-- The update checker reads this repository's releases. Versions restart at 0.1.
+- New orchid icon (`dist/trudy.svg`): white-and-pink orchids on deep teal. `trudy.exe`, window
+  titles, dialogs, release files `trudy-*`, desktop id `dev.trudy.trudy`; the about box says what
+  Trudy changes and credits Orchid and Eden. The update checker reads this repository's releases.
 
 ## Test results
 
-Tested 2026-11-05 on an AMD Ryzen 7 9800X3D with an NVIDIA GeForce RTX 4090 (driver 621.01,
-Vulkan 1.4.357), Windows 11.
+All measurements: AMD Ryzen 7 9800X3D, NVIDIA GeForce RTX 4090 (driver 621.01), 32 GB, Windows 11,
+2026-11-05.
+
+### Ocarina of Time (Switch 2), release builds
+
+Hidden `eden-cli` runs on a copy of the save: load the autosave in Kokiri Forest, then 75 s of
+gameplay with Link standing outside his house. Docked, 1x, GPU accuracy Low, asynchronous shaders,
+BC3, conservative VRAM, FIFO Relaxed. The 30 FPS patch is **off** so the full rate shows. Frame
+time is the mean of the emulator's own present statistics (600 frames per window).
+
+| Build | Settings | Frame time | FPS | 4090 busy |
+|---|---|---|---|---|
+| Trudy 0.1.0 (Orchid's emulation code), `-zen5` | Orchid's Ocarina of Time preset (reactive flushing on) | 28.8 ms | 34.7 | 55% |
+| Trudy (this version), `-zen5` | the same | 22.9 ms | 43.7 | 37% |
+| **Trudy (this version), `-zen5`** | **Trudy's preset (reactive flushing off)** | **17.9 ms** | **56.0** | 38% |
+
+What the profiling showed, before and after (debug-symbol build, GPU timers on):
+
+| | Before | After |
+|---|---|---|
+| Buffer data copied back from the GPU | 8.6 GB/s in ~4,800 copies | 0.7 GB/s |
+| Host GPU time in command buffers | 531 ms per second | 273 ms per second |
+| ... of which the game's own draws and compute shaders | 110 ms | 166 ms (more frames) |
+| Main game core waiting for GPU data | 35% of its time | 8% (reactive flushing off) |
+
+Measured and **not** kept: fence submission batching (−40% submissions, same frame time; opt-in),
+a cache for `MaxContinuousRange` (no measurable gain; removed), tensor cores by default (same frame
+time, one shader rejected; opt-in).
+
+Visual check: with the old whole-range copies, the leaves in Kokiri Forest flash with a large
+white glow in 4 of 6 sampled frames while Link stands still; with page copies they do not. The
+whole-range copies wrote stale GPU data over memory the game had just written, which would explain
+it. Please report if the glow is part of the game.
+
+### Other checks
 
 | Test | Result |
 |---|---|
-| Driver exposes what the tensor path needs (`VK_KHR_cooperative_matrix`, `cooperativeMatrix`, `shaderFloat16`) | ✅ all present, so the tensor-core default switches on for this card |
 | GPU name detection, run against the real `RefineNvidiaArchitecture` code | ✅ RTX 4090 / 4060 Laptop / RTX 6000 Ada / L40S / L4 → Ada; RTX 5090 / 5070 Ti / RTX PRO 6000 Blackwell → Blackwell; RTX 3090 / RTX A4000 stay Ampere; Quadro RTX 4000 stays Turing |
-| L3 domain detection on the 9800X3D (Windows, compiled with MSVC 2026) | ✅ one L3 domain found, thread placement left to Windows (mask `0xffff` before and after), as intended on single-CCD parts |
-| `TRUDY_CCD_AFFINITY=0` | ✅ skips the detection |
-| CI builds ([run 42142396276](https://github.com/joshpack/Trudy/actions/runs/42142396276)) | ✅ all 9 pass: Windows MSVC, Windows `-pgo`, **Windows `-zen5`**, Linux x86-64, `-pgo`, **`-zen5`**, Linux ARM64 and `-pgo`, macOS ARM |
-| Unit tests, Windows MSVC ([run 42142072841](https://github.com/joshpack/Trudy/actions/runs/42142072841)) | ⚠️ 521 of 523 pass. The 2 failures (`ampere_kirby.cpp:163`, `ampere_f2i.cpp:821`) are in Orchid's shader-lowering tests; Trudy changes no shader or test code, so they come from Orchid `52d4474` |
-| Windows `-zen5` build started on the 9800X3D + RTX 4090 | ✅ opens; window title shows Trudy v0.1.0, built with Clang 23.1.5 |
+| L3 domain detection on the 9800X3D | ✅ one L3 domain found and logged, thread placement left to Windows, as intended on single-CCD parts |
+| CI builds | ✅ Windows MSVC, `-pgo`, `-zen5`; Linux x86-64, `-pgo`, `-zen5`; Linux ARM64 and `-pgo`; macOS ARM |
+| Unit tests, Windows MSVC | ⚠️ 521 of 523 pass; the 2 failures (`ampere_kirby.cpp:163`, `ampere_f2i.cpp:821`) are in Orchid's shader-lowering tests, which Trudy does not change |
 
 **Not tested yet**
 
-- **In-game FPS.** Measuring needs Switch 2 games and keys dumped from your own console. Orchid's
-  numbers for its own test PC are below; Trudy numbers will be added as people report them.
-  Please open an issue with your CPU, GPU, game and FPS for Orchid and Trudy side by side.
-- **Dual-CCD Ryzen pinning on real hardware.** The detection code is the same as on the 9800X3D,
-  but the pinning only does something on a two-CCD chip, which this test PC is not.
-- **Tensor-core shaders in a game.** The `fast` path is Orchid's own experimental code; Trudy only
-  turns it on by default for RTX 40/50. If a game shows broken effects, try `EDEN_NX2_TENSOR=soft`
-  and please report it.
-- **Linux.** The Linux builds (including `-zen5`) compile in CI but have not been run on hardware.
+- Other games: only Ocarina of Time was available for testing. The copy-back fix is generic, but
+  please report FPS for Orchid and Trudy side by side.
+- Dual-CCD Ryzen pinning on real hardware (this PC has a single CCD), and Linux on hardware.
+- ThinLTO for the `-zen5` builds: CMake's IPO check fails with the CI toolchains, so they are built
+  without it for now.
 
 ### Orchid's measurements (upstream, for reference)
 
@@ -162,14 +216,18 @@ adds or changes:
 
 | Variable | Trudy default | Meaning |
 |---|---|---|
+| `TRUDY_PAGE_DOWNLOADS` | on | `0` copies whole GPU-written ranges back at fences again, as Orchid does |
+| `TRUDY_SWITCH2_DEFAULTS` | on | `0` leaves Switch 2 games without a preset on Eden's defaults |
 | `TRUDY_CCD_AFFINITY` | on | `0` lets Windows/Linux place the hot threads anywhere |
-| `EDEN_NX2_TENSOR` | `fast` on RTX 40/50 | `soft` runs tensor instructions in software, as Orchid does |
 | `EDEN_NX2_GPU_WAIT_SPIN_US` | `50` on 12+ thread CPUs | `0` turns the spin off |
+| `EDEN_NX2_TENSOR` | software | `fast` runs tensor instructions on RTX tensor cores (experimental) |
 | `EDEN_NX2_AVX512` | on | `0` makes the JIT use AVX2 code only |
+| `TRUDY_FENCE_BATCH` | off | `<n>` lets up to n fences share one GPU submission (experimental) |
+| `TRUDY_GPU_TIMING` / `TRUDY_GPU_TRACE` | off | `1` logs host GPU time per shader/pass/command (profiling; costs speed) |
 
-Recommended in-app settings on an RTX 4090: resolution scaling 2x-3x. The GPU is mostly idle
-in these games, so higher internal resolution costs almost no frame rate. Keep Orchid's per-game
-defaults for GPU accuracy.
+Ocarina of Time: accept the recommended settings when Trudy offers them. They keep the built-in
+30 FPS patch, which holds the game at full speed; without it the game runs at ~56 FPS on a
+9800X3D + RTX 4090, and below 60 its game time slows down with the frame rate.
 
 ## Download
 

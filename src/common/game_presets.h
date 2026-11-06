@@ -69,8 +69,12 @@ inline void SetMarioTennisFeverRecommendedSettings(Values& settings, bool global
 inline void SetOcarinaOfTimeRecommendedSettings(Values& settings, bool global) {
     Detail::SetSwitch2BaseSettings(settings, global);
     const auto session = Detail::SessionSetter(global);
-    // Leon's playtest: 24-25 ms median frame time with reactive flushing, 36 ms without.
-    session(settings.use_reactive_flushing, true);
+    // Reactive flushing off, as every other Switch 2 preset. Leon's playtest found it faster on
+    // (24-25 ms median frame time, 36 ms off) while each fence copied whole GPU-written ranges
+    // back; with Trudy copying back only the pages the CPU reads, off is faster: 17.9 ms against
+    // 22.9 ms in Kokiri Forest (9800X3D + RTX 4090, zen5 build, 30 FPS patch off), the main core
+    // waiting on GPU reads 8% of the time instead of 31% (Trudy README, test results).
+    session(settings.use_reactive_flushing, false);
     session(settings.fps30_patch, true);
 }
 
@@ -104,7 +108,7 @@ inline constexpr GamePreset GamePresets[] = {
      SetMarioTennisFeverRecommendedSettings},
     {OcarinaOfTimeProgramId, "The Legend of Zelda: Ocarina of Time",
      "Vulkan, 1x resolution, GPU Fast, asynchronous shaders, BC3, conservative VRAM, reactive "
-     "flushing on, FIFO Relaxed VSync, ScaleForce, FXAA and the built-in 30 FPS game patch "
+     "flushing off, FIFO Relaxed VSync, ScaleForce, FXAA and the built-in 30 FPS game patch "
      "(supported game builds only).",
      SetOcarinaOfTimeRecommendedSettings},
 };

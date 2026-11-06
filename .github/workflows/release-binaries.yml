@@ -144,17 +144,16 @@ jobs:
             pgo: true
             mingw: true
           # Trudy: Ryzen 9000 builds (-march=znver5), same toolchains and profile as the -pgo ones.
+          # (lto: true would add ThinLTO, but CMake's IPO check fails with these toolchains.)
           - platform: windows-x86_64-zen5
             runner: windows-2022
             pgo: true
             mingw: true
             preset: zen5
-            lto: true
           - platform: linux-x86_64-zen5
             runner: ubuntu-24.04
             pgo: true
             preset: zen5
-            lto: true
           - platform: linux-aarch64
             runner: ubuntu-24.04-arm
           - platform: linux-aarch64-pgo

@@ -50,6 +50,7 @@ Ryzen and RTX 40/50 work comes on top.
 | GPU results copied back to the game | once the game's CPU has read **any** page of a buffer the GPU writes, the **whole** written range is copied back after every write (Ocarina of Time: **8.6 GB/s** over PCIe, a third of the 4090's time) | only the pages the game's CPU actually reads (**0.7 GB/s**); the rest is fetched on demand if it is ever read |
 | Ocarina of Time preset | reactive flushing on | reactive flushing off: the game's main core waits on GPU reads 8% of the time instead of 31% |
 | Ocarina of Time, Kokiri Forest | the leaves flash with a large white glow (the whole-range copies write stale GPU data over memory the game just wrote) | drawn correctly |
+| "Use the recommended settings?" question | No is the default answer | Yes is the default answer, so Enter accepts |
 | Switch 2 games without a preset | GPU accuracy High (the GPU thread split stays off), synchronous shaders, reactive flushing on | what all of Orchid's presets share: accuracy Low (split on, ~1.46x draws a second), Balanced fences, asynchronous shaders, reactive flushing off. Only where you have not picked these yourself |
 | Ryzen 9000 (Zen 5) | generic x86-64 + PGO builds | also **`-zen5`** builds: `-march=znver5` + the same PGO profile |
 | Dual-CCD Ryzen (7950X3D, 9950X3D, 9900X3D, 9950X...) | threads go wherever Windows puts them | hot threads kept **on one CCD**, the **3D V-Cache CCD** on X3D parts |
@@ -79,6 +80,9 @@ Ryzen and RTX 40/50 work comes on top.
   share (GPU accuracy Low, Balanced fences, asynchronous shaders, reactive flushing off), only
   where neither the game's own setting nor your global one was changed.
   `TRUDY_SWITCH2_DEFAULTS=0` turns this off.
+- `main_window.cpp`: the "Use the recommended settings?" question defaults to **Yes**, so Enter
+  accepts it and Esc declines. In Orchid the default is No, and a game that declines runs on your
+  own settings, by default the slow ones (GPU accuracy High, synchronous shaders).
 - Experimental, off by default: `TRUDY_FENCE_BATCH=<n>` lets up to n fences share one GPU
   submission. It cut submissions by ~40% but did not change the frame time.
 
@@ -226,9 +230,10 @@ adds or changes:
 | `TRUDY_FENCE_BATCH` | off | `<n>` lets up to n fences share one GPU submission (experimental) |
 | `TRUDY_GPU_TIMING` / `TRUDY_GPU_TRACE` | off | `1` logs host GPU time per shader/pass/command (profiling; costs speed) |
 
-Ocarina of Time: accept the recommended settings when Trudy offers them. They keep the built-in
-30 FPS patch, which holds the game at full speed; without it the game runs at ~56 FPS on a
-9800X3D + RTX 4090, and below 60 its game time slows down with the frame rate.
+Ocarina of Time: accept the recommended settings when Trudy offers them (Yes is the default, so
+Enter accepts them). They keep the built-in 30 FPS patch, which holds the game at full speed;
+without it the game runs at ~56 FPS on a 9800X3D + RTX 4090, and below 60 its game time slows
+down with the frame rate.
 
 ## Download
 

@@ -30,6 +30,7 @@ The first Trudy release: Orchid 0.7.5 with all of its game fixes (and Orchid's n
 
 ### Also
 
+- The "Use the recommended settings?" question defaults to Yes, so pressing Enter accepts it (Esc declines).
 - Profiling tools: `TRUDY_GPU_TIMING=1` and `TRUDY_GPU_TRACE=1` log the host GPU's time per shader, render pass and command.
 - New name and orchid icon; `trudy.exe`. Settings, keys, firmware and saves are shared with Orchid (`%APPDATA%\eden`).
 

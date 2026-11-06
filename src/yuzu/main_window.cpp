@@ -1975,6 +1975,9 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
         preset != nullptr && !recommended_settings_answers.contains(title_id)) {
         const QString name = QString::fromUtf8(preset->name);
         // EDEN_RECOMMENDED_SETTINGS=0|1 answers without the dialog (headless test harness).
+        // Yes is the default button, so Enter accepts and Esc declines: without the recommended
+        // settings a game runs on the user's own settings, by default the slow ones (High GPU
+        // accuracy, synchronous shaders).
         const QByteArray preset_answer = qgetenv("EDEN_RECOMMENDED_SETTINGS");
         const bool accepted =
             !preset_answer.isEmpty() ? preset_answer == "1" :
@@ -1984,7 +1987,7 @@ void MainWindow::BootGame(const QString& filename, Service::AM::FrontendAppletPa
                    "They apply to %1 until Trudy is closed. Your saved settings are not "
                    "changed.")
                     .arg(name, QString::fromUtf8(preset->summary)),
-                QMessageBox::Yes | QMessageBox::No, QMessageBox::No) == QMessageBox::Yes;
+                QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes) == QMessageBox::Yes;
         recommended_settings_answers[title_id] = accepted;
         LOG_INFO(Config, "{} recommended settings accepted: {}", preset->name, accepted);
     }
